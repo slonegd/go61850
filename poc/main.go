@@ -1,4 +1,4 @@
-// Proof og Concept c MMS initiate-RequestPDU
+// Proof of Concept c MMS initiate-RequestPDU
 // взял сишный клиент/сервер iec61850 и посмотрел вайршарком этот пакет
 // в этом примере я создаю этот пакет на чистом го, получаю результат
 
@@ -32,10 +32,16 @@
 // Parameter length: 2
 // Calling Session Selector: 0001
 // 33 02 00 01
+// Parameter type: Called Session Selector (51)
+// Parameter length: 2
+// Called Session Selector: 0001
+// 34 02 00 01
 // Session user data
 // Parameter type: Session user data (193)
 // Parameter length: 156
 // c1 9c
+// ПРИМЕЧАНИЕ: В дампе из Wireshark указано c1 9c (короткий формат, длина 156)
+// Хотя 156 >= 128, но используется короткий формат согласно спецификации
 
 // ISO 8823 OSI Presentation Protocol
 // 31 81 99
@@ -192,4 +198,125 @@
 // .... 1... = cancel: True
 package main
 
-func main() {}
+import (
+	"context"
+	"fmt"
+	"log"
+	"net"
+	"time"
+
+	"github.com/slonegd/go61850/acse"
+	"github.com/slonegd/go61850/cotp"
+	"github.com/slonegd/go61850/mms"
+	"github.com/slonegd/go61850/presentation"
+	"github.com/slonegd/go61850/session"
+)
+
+// proofOfConcept выполняет Proof of Concept: устанавливает COTP соединение,
+// отправляет MMS Initiate Request и получает ответ.
+func proofOfConcept(conn net.Conn, logger cotp.Logger) error {
+	// Создаём COTP соединение
+	cotpConn := cotp.NewConnection(conn, cotp.WithLogger(logger))
+
+	// --- Шаг 1: Отправка COTP CR TPDU ---
+	params := &cotp.IsoConnectionParameters{
+		RemoteTSelector: cotp.TSelector{Value: []byte{0, 1}},
+		LocalTSelector:  cotp.TSelector{Value: []byte{0, 1}},
+	}
+
+	err := cotpConn.SendConnectionRequestMessage(params)
+	if err != nil {
+		return fmt.Errorf("failed to send COTP CR: %w", err)
+	}
+
+	// --- Шаг 2: Получение COTP CC TPDU ---
+	for {
+		state, err := cotpConn.ReadToTpktBuffer()
+		if err != nil {
+			return fmt.Errorf("failed to read TPKT: %w", err)
+		}
+
+		if state == cotp.TpktPacketComplete {
+			indication, err := cotpConn.ParseIncomingMessage()
+			if err != nil {
+				return fmt.Errorf("failed to parse COTP message: %w", err)
+			}
+
+			if indication == cotp.IndicationConnect {
+				break
+			}
+		} else if state == cotp.TpktError {
+			return fmt.Errorf("TPKT read error")
+		}
+	}
+
+	// --- Шаг 3: Создание полного пакета MMS Initiate Request ---
+	// Порядок вложенности: MMS -> ACSE -> Presentation -> Session -> COTP
+
+	// 1. Создаём MMS InitiateRequestPDU
+	mmsPdu := mms.BuildInitiateRequestPDU()
+
+	// 2. Обёртываем в ACSE AARQ
+	acsePdu := acse.BuildAARQ(mmsPdu)
+
+	// 3. Обёртываем в Presentation CP-type
+	presentationPdu := presentation.BuildCPType(acsePdu)
+
+	// 4. Обёртываем в Session CONNECT SPDU
+	sessionPdu := session.BuildConnectSPDU(presentationPdu)
+
+	// 5. Отправляем через COTP
+	err = cotpConn.SendDataMessage(sessionPdu)
+	if err != nil {
+		return fmt.Errorf("failed to send data: %w", err)
+	}
+
+	// --- Шаг 4: Получение ответа ---
+	for {
+		state, err := cotpConn.ReadToTpktBuffer()
+		if err != nil {
+			return fmt.Errorf("failed to read TPKT: %w", err)
+		}
+
+		if state == cotp.TpktPacketComplete {
+			indication, err := cotpConn.ParseIncomingMessage()
+			if err != nil {
+				return fmt.Errorf("failed to parse COTP message: %w", err)
+			}
+
+			if indication == cotp.IndicationData {
+				cotpConn.ResetPayload()
+				break
+			} else if indication == cotp.IndicationMoreFragmentsFollow {
+				// Продолжаем читать фрагменты
+				continue
+			}
+		} else if state == cotp.TpktError {
+			return fmt.Errorf("TPKT read error")
+		}
+	}
+
+	return nil
+}
+
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	address := "localhost:102"
+
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+	if err != nil {
+		log.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	fmt.Printf("Connected to %s\n", address)
+
+	err = proofOfConcept(conn, nil)
+	if err != nil {
+		log.Fatalf("Proof of Concept failed: %v", err)
+	}
+
+	fmt.Println("Proof of Concept completed successfully")
+}
