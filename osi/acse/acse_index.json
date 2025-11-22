@@ -1,0 +1,164 @@
+{
+  "package": "acse",
+  "description": "ACSE (Association Control Service Element) protocol implementation for IEC 61850, based on libIEC61850 C library. Provides functions for creating and parsing ACSE PDUs (AARQ, AARE, etc.) using BER encoding.",
+  "imports": [
+    "errors",
+    "fmt",
+    "github.com/slonegd/go61850/ber"
+  ],
+  "types": {
+    "ConnectionState": {
+      "type": "int",
+      "description": "Represents the state of an ACSE connection",
+      "values": [
+        {"name": "StateIdle", "value": 0},
+        {"name": "StateRequestIndicated", "value": 1},
+        {"name": "StateConnected", "value": 2}
+      ]
+    },
+    "Indication": {
+      "type": "int",
+      "description": "Represents an ACSE indication",
+      "values": [
+        {"name": "IndicationError", "value": 0},
+        {"name": "IndicationAssociate", "value": 1},
+        {"name": "IndicationAssociateFailed", "value": 2},
+        {"name": "IndicationOK", "value": 3},
+        {"name": "IndicationAbort", "value": 4},
+        {"name": "IndicationReleaseRequest", "value": 5},
+        {"name": "IndicationReleaseResponse", "value": 6}
+      ]
+    },
+    "AuthenticationMechanism": {
+      "type": "int",
+      "description": "Represents ACSE authentication mechanisms",
+      "values": [
+        {"name": "AuthNone", "value": 0},
+        {"name": "AuthPassword", "value": 1},
+        {"name": "AuthCertificate", "value": 2},
+        {"name": "AuthTLS", "value": 3}
+      ]
+    },
+    "AuthenticationParameter": {
+      "type": "struct",
+      "description": "Represents ACSE authentication parameters",
+      "fields": [
+        {"name": "Mechanism", "type": "AuthenticationMechanism", "description": "Authentication mechanism type"},
+        {"name": "Password", "type": "[]byte", "description": "Password for ACSE_AUTH_PASSWORD"},
+        {"name": "Certificate", "type": "[]byte", "description": "Certificate for ACSE_AUTH_CERTIFICATE or ACSE_AUTH_TLS"}
+      ]
+    },
+    "ApplicationReference": {
+      "type": "struct",
+      "description": "Represents ISO application reference",
+      "fields": [
+        {"name": "APTitle", "type": "ber.ItuObjectIdentifier", "description": "Application Process Title (OID)"},
+        {"name": "AEQualifier", "type": "int32", "description": "Application Entity Qualifier"}
+      ]
+    },
+    "Connection": {
+      "type": "struct",
+      "description": "Represents an ACSE connection",
+      "fields": [
+        {"name": "State", "type": "ConnectionState", "description": "Current connection state"},
+        {"name": "NextReference", "type": "uint32", "description": "Next reference number"},
+        {"name": "UserDataBuffer", "type": "[]byte", "description": "User data buffer"},
+        {"name": "UserDataBufferSize", "type": "int", "description": "User data buffer size"},
+        {"name": "ApplicationRef", "type": "ApplicationReference", "description": "ISO application reference"}
+      ]
+    },
+    "IsoConnectionParameters": {
+      "type": "struct",
+      "description": "Represents ISO connection parameters",
+      "fields": [
+        {"name": "RemoteAPTitle", "type": "[]byte", "description": "Remote AP Title"},
+        {"name": "RemoteAPTitleLen", "type": "int", "description": "Remote AP Title length"},
+        {"name": "RemoteAEQualifier", "type": "int32", "description": "Remote AE Qualifier"},
+        {"name": "LocalAPTitle", "type": "[]byte", "description": "Local AP Title"},
+        {"name": "LocalAPTitleLen", "type": "int", "description": "Local AP Title length"},
+        {"name": "LocalAEQualifier", "type": "int32", "description": "Local AE Qualifier"}
+      ]
+    }
+  },
+  "functions": {
+    "NewConnection": {
+      "signature": "NewConnection() *Connection",
+      "description": "Creates a new ACSE connection"
+    },
+    "BuildAARQ": {
+      "signature": "BuildAARQ(userData []byte) []byte",
+      "description": "Creates an AARQ (Association Request) PDU. This is a simplified version that matches the expected packet structure"
+    },
+    "CreateAssociateRequestMessage": {
+      "signature": "CreateAssociateRequestMessage(conn *Connection, isoParams *IsoConnectionParameters, payload []byte, authParam *AuthenticationParameter) []byte",
+      "description": "Creates an AARQ (Association Request) PDU. Based on AcseConnection_createAssociateRequestMessage from acse.c"
+    },
+    "ParseMessage": {
+      "signature": "ParseMessage(conn *Connection, message []byte) (Indication, error)",
+      "description": "Parses an incoming ACSE message. Based on AcseConnection_parseMessage from acse.c"
+    },
+    "CreateAssociateResponseMessage": {
+      "signature": "CreateAssociateResponseMessage(conn *Connection, acseResult uint8, payload []byte) []byte",
+      "description": "Creates an AARE (Association Response) PDU. Based on AcseConnection_createAssociateResponseMessage from acse.c"
+    },
+    "CreateAssociateFailedMessage": {
+      "signature": "CreateAssociateFailedMessage(conn *Connection, payload []byte) []byte",
+      "description": "Creates an AARE with reject permanent result"
+    },
+    "CreateAbortMessage": {
+      "signature": "CreateAbortMessage(conn *Connection, isProvider bool) []byte",
+      "description": "Creates an A_ABORT PDU"
+    },
+    "CreateReleaseRequestMessage": {
+      "signature": "CreateReleaseRequestMessage(conn *Connection) []byte",
+      "description": "Creates an A_RELEASE.request PDU"
+    },
+    "CreateReleaseResponseMessage": {
+      "signature": "CreateReleaseResponseMessage(conn *Connection) []byte",
+      "description": "Creates an A_RELEASE.response PDU"
+    },
+    "parseAarqPdu": {
+      "signature": "parseAarqPdu(conn *Connection, buffer []byte, bufPos, maxBufPos int) (Indication, error)",
+      "description": "Parses an AARQ PDU. Based on parseAarqPdu from acse.c",
+      "private": true
+    },
+    "parseAarePdu": {
+      "signature": "parseAarePdu(conn *Connection, buffer []byte, bufPos, maxBufPos int) (Indication, error)",
+      "description": "Parses an AARE PDU. Based on parseAarePdu from acse.c",
+      "private": true
+    },
+    "parseUserInformation": {
+      "signature": "parseUserInformation(conn *Connection, buffer []byte, bufPos, maxBufPos int, userInfoValid *bool) (int, error)",
+      "description": "Parses user information from ACSE PDU. Based on parseUserInformation from acse.c",
+      "private": true
+    },
+    "determineIntegerEncodedSize": {
+      "signature": "determineIntegerEncodedSize(value int32) int",
+      "description": "Determines the encoded size of an integer. For small values (0-127), returns 1 byte",
+      "private": true
+    },
+    "encodeInteger": {
+      "signature": "encodeInteger(value int32, buffer []byte, bufPos int) int",
+      "description": "Encodes an integer value in BER format. For small values (0-127), encodes as 1 byte",
+      "private": true
+    }
+  },
+  "constants": {
+    "ResultAccept": {
+      "value": 0,
+      "type": "int",
+      "description": "ACSE result: accept"
+    },
+    "ResultRejectPermanent": {
+      "value": 1,
+      "type": "int",
+      "description": "ACSE result: reject permanent"
+    },
+    "ResultRejectTransient": {
+      "value": 2,
+      "type": "int",
+      "description": "ACSE result: reject transient"
+    }
+  }
+}
+

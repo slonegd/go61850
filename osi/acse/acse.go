@@ -1,120 +1,720 @@
 package acse
 
-// BuildAARQ создаёт AARQ (Association Request) PDU.
-// Возвращает захардкоженный AARQ согласно спецификации из poc/main.go.
+import (
+	"errors"
+	"fmt"
+
+	"github.com/slonegd/go61850/ber"
+)
+
+// ConnectionState represents the state of an ACSE connection
+type ConnectionState int
+
+const (
+	StateIdle ConnectionState = iota
+	StateRequestIndicated
+	StateConnected
+)
+
+// Indication represents an ACSE indication
+type Indication int
+
+const (
+	IndicationError Indication = iota
+	IndicationAssociate
+	IndicationAssociateFailed
+	IndicationOK
+	IndicationAbort
+	IndicationReleaseRequest
+	IndicationReleaseResponse
+)
+
+// Result represents ACSE result codes
+const (
+	ResultAccept            = 0
+	ResultRejectPermanent   = 1
+	ResultRejectTransient   = 2
+)
+
+// AuthenticationMechanism represents ACSE authentication mechanisms
+type AuthenticationMechanism int
+
+const (
+	AuthNone AuthenticationMechanism = iota
+	AuthPassword
+	AuthCertificate
+	AuthTLS
+)
+
+// AuthenticationParameter represents ACSE authentication parameters
+type AuthenticationParameter struct {
+	Mechanism AuthenticationMechanism
+	Password  []byte // for ACSE_AUTH_PASSWORD
+	Certificate []byte // for ACSE_AUTH_CERTIFICATE or ACSE_AUTH_TLS
+}
+
+// ApplicationReference represents ISO application reference
+type ApplicationReference struct {
+	APTitle    ber.ItuObjectIdentifier
+	AEQualifier int32
+}
+
+// Connection represents an ACSE connection
+type Connection struct {
+	State              ConnectionState
+	NextReference      uint32
+	UserDataBuffer     []byte
+	UserDataBufferSize int
+	ApplicationRef     ApplicationReference
+	// Note: Authenticator callback is not implemented in this version
+	// as it's not needed for basic functionality
+}
+
+// NewConnection creates a new ACSE connection
+func NewConnection() *Connection {
+	return &Connection{
+		State:         StateIdle,
+		NextReference: 0,
+	}
+}
+
+// Constants for ACSE OIDs and values
+var (
+	appContextNameMms = []byte{0x28, 0xca, 0x22, 0x02, 0x03}
+	authMechPasswordOID = []byte{0x52, 0x03, 0x01}
+	requirementsAuthentication = []byte{0x80}
+)
+
+// BuildAARQ creates an AARQ (Association Request) PDU
+// This is a simplified version that matches the expected packet structure
 func BuildAARQ(userData []byte) []byte {
-	// AARQ согласно комментарию в poc/main.go:
-	// 60 55
-	// aarq
-	// a1 07 06 05 28 ca 22 02 03 - aSO-context-name: 1.0.9506.2.3 (MMS)
-	// a2 07 06 05 29 01 87 67 01 - called-AP-title: ap-title-form2: 1.1.1.999.1 (iso.1.1.999.1)
-	// a3 03 02 01 0c - called-AE-qualifier: aso-qualifier-form2: 12
-	// a6 06 06 04 29 01 87 67 - calling-AP-title: ap-title-form2: 1.1.1.999 (iso.1.1.999)
-	// a7 03 02 01 0c - calling-AE-qualifier: aso-qualifier-form2: 12
-	// be 2f 28 2d - user-information: 1 item: Association-data
-	// 02 01 03 - indirect-reference: 3
-	// a0 28 - encoding: single-ASN1-type (0)
-	// <userData>
-
-	aarq := []byte{}
-
-	// AARQ tag (Application 0, Constructed) = 0x60
-	aarq = append(aarq, 0x60)
-
-	// Вычисляем длину содержимого
-	// aSO-context-name: 9 байт (a1 07 06 05 28 ca 22 02 03)
-	// called-AP-title: 9 байт (a2 07 06 05 29 01 87 67 01)
-	// called-AE-qualifier: 5 байт (a3 03 02 01 0c)
-	// calling-AP-title: 8 байт (a6 06 06 04 29 01 87 67)
-	// calling-AE-qualifier: 5 байт (a7 03 02 01 0c)
-	// user-information: 4 байта заголовок + 3 байта + 2 байта + длина userData
-	fixedPartLength := 9 + 9 + 5 + 8 + 5 + 4 + 3 + 2 + len(userData)
-	totalLength := fixedPartLength
-
-	// Добавляем длину
-	if totalLength < 0x80 {
-		aarq = append(aarq, byte(totalLength))
-	} else if totalLength <= 0xFF {
-		aarq = append(aarq, 0x81, byte(totalLength))
-	} else {
-		aarq = append(aarq, 0x82, byte(totalLength>>8), byte(totalLength&0xFF))
+	conn := NewConnection()
+	isoParams := &IsoConnectionParameters{
+		RemoteAPTitle:     []byte{0x29, 0x01, 0x87, 0x67, 0x01},
+		RemoteAPTitleLen: 5,
+		RemoteAEQualifier: 12,
+		LocalAPTitle:      []byte{0x29, 0x01, 0x87, 0x67},
+		LocalAPTitleLen:   4,
+		LocalAEQualifier:  12,
 	}
+	return CreateAssociateRequestMessage(conn, isoParams, userData, nil)
+}
 
-	// aSO-context-name (Context-specific 1, Constructed)
-	aarq = append(aarq, 0xA1, 0x07, 0x06, 0x05, 0x28, 0xca, 0x22, 0x02, 0x03)
+// IsoConnectionParameters represents ISO connection parameters
+type IsoConnectionParameters struct {
+	RemoteAPTitle     []byte
+	RemoteAPTitleLen  int
+	RemoteAEQualifier int32
+	LocalAPTitle      []byte
+	LocalAPTitleLen   int
+	LocalAEQualifier  int32
+}
 
-	// called-AP-title (Context-specific 2, Constructed)
-	aarq = append(aarq, 0xA2, 0x07, 0x06, 0x05, 0x29, 0x01, 0x87, 0x67, 0x01)
-
-	// called-AE-qualifier (Context-specific 3, INTEGER)
-	aarq = append(aarq, 0xA3, 0x03, 0x02, 0x01, 0x0C)
-
-	// calling-AP-title (Context-specific 6, Constructed)
-	aarq = append(aarq, 0xA6, 0x06, 0x06, 0x04, 0x29, 0x01, 0x87, 0x67)
-
-	// calling-AE-qualifier (Context-specific 7, INTEGER)
-	aarq = append(aarq, 0xA7, 0x03, 0x02, 0x01, 0x0C)
-
-	// user-information (Context-specific 30, Constructed)
-	// Вычисляем длину user-information содержимого
-	// Правильная структура: Association-data = 47 байт
-	//   = tag+length (2) + indirect-reference (3) + encoding (42) = 47
-	//   где encoding = tag+length (2) + userData (40) = 42
-	//
-	// В коде разбито:
-	//   3 = indirect-reference (02 01 03)
-	//   1 = Association-data tag (28)
-	//   1 = Association-data length (2d)
-	//   1 = encoding tag (a0)
-	//   1 = encoding length (28)
-	//   len(userData) = 40 байт (MMS PDU)
-	// Правильнее было бы: 2 (Association-data tag+length) + 3 (indirect-reference) + 42 (encoding) = 47
-	userInfoLength := 3 + 1 + 1 + 1 + 1 + len(userData)
-	aarq = append(aarq, 0xBE) // Context-specific 30
-	if userInfoLength < 0x80 {
-		aarq = append(aarq, byte(userInfoLength))
-	} else if userInfoLength <= 0xFF {
-		aarq = append(aarq, 0x81, byte(userInfoLength))
-	} else {
-		aarq = append(aarq, 0x82, byte(userInfoLength>>8), byte(userInfoLength&0xFF))
+// CreateAssociateRequestMessage creates an AARQ (Association Request) PDU
+// Based on AcseConnection_createAssociateRequestMessage from acse.c
+func CreateAssociateRequestMessage(conn *Connection, isoParams *IsoConnectionParameters, payload []byte, authParam *AuthenticationParameter) []byte {
+	payloadLength := len(payload)
+	
+	// Calculate content length
+	contentLength := 0
+	
+	// Application context name (fixed: 9 bytes)
+	contentLength += 9
+	
+	// Called AP title and AE qualifier
+	if isoParams != nil && isoParams.RemoteAPTitleLen > 0 {
+		// Called AP title: tag(1) + length(1) + OID tag(1) + length(1) + OID data
+		contentLength += 4 + isoParams.RemoteAPTitleLen
+		
+		// Called AE qualifier: tag(1) + length(1) + integer tag(1) + length(1) + value
+		// For small values like 12, we need to encode as 1 byte, not 4
+		calledAEQualifierLength := determineIntegerEncodedSize(int32(isoParams.RemoteAEQualifier))
+		contentLength += 4 + calledAEQualifierLength
 	}
-
-	// Association-data (Application 28, Constructed)
-	// Вычисляем длину Association-data содержимого
-	// Правильная структура: 45 байт
-	//   = indirect-reference (3) + encoding (42) = 45
-	//   где encoding = tag+length (2) + userData (40) = 42
-	//
-	// В коде разбито (для компенсации недостающих байтов):
-	//   2 = часть indirect-reference (02 01) - не хватает еще 1 байта (03)
-	//   1 = оставшийся байт indirect-reference (03)
-	//   1 = encoding tag (a0)
-	//   1 = encoding length (28)
-	//   len(userData) = 40 байт (MMS PDU)
-	// Правильнее было бы: 3 (indirect-reference: 02 01 03) + 2 (encoding: a0 28) + 40 (userData) = 45
-	assocDataLength := 2 + 1 + 1 + 1 + len(userData)
-	aarq = append(aarq, 0x28) // Application 28
-	if assocDataLength < 0x80 {
-		aarq = append(aarq, byte(assocDataLength))
-	} else if assocDataLength <= 0xFF {
-		aarq = append(aarq, 0x81, byte(assocDataLength))
-	} else {
-		aarq = append(aarq, 0x82, byte(assocDataLength>>8), byte(assocDataLength&0xFF))
+	
+	// Calling AP title and AE qualifier
+	if isoParams != nil && isoParams.LocalAPTitleLen > 0 {
+		// Calling AP title: tag(1) + length(1) + OID tag(1) + length(1) + OID data
+		contentLength += 4 + isoParams.LocalAPTitleLen
+		
+		// Calling AE qualifier: tag(1) + length(1) + integer tag(1) + length(1) + value
+		// For small values like 12, we need to encode as 1 byte, not 4
+		callingAEQualifierLength := determineIntegerEncodedSize(int32(isoParams.LocalAEQualifier))
+		contentLength += 4 + callingAEQualifierLength
 	}
-
-	// indirect-reference (INTEGER 3)
-	aarq = append(aarq, 0x02, 0x01, 0x03)
-
-	// encoding: single-ASN1-type (Context-specific 0, Constructed)
-	aarq = append(aarq, 0xA0)
-	if len(userData) < 0x80 {
-		aarq = append(aarq, byte(len(userData)))
-	} else if len(userData) <= 0xFF {
-		aarq = append(aarq, 0x81, byte(len(userData)))
-	} else {
-		aarq = append(aarq, 0x82, byte(len(userData)>>8), byte(len(userData)&0xFF))
+	
+	// Authentication (if provided)
+	if authParam != nil {
+		// Sender ACSE requirements: 4 bytes
+		contentLength += 4
+		
+		// Mechanism name: 5 bytes
+		contentLength += 5
+		
+		// Authentication value
+		if authParam.Mechanism == AuthPassword {
+			passwordLength := len(authParam.Password)
+			authValueStringLength := ber.DetermineLengthSize(uint32(passwordLength))
+			contentLength += 2 + authValueStringLength + passwordLength
+			
+			authValueLength := ber.DetermineLengthSize(uint32(passwordLength + authValueStringLength + 1))
+			contentLength += authValueLength
+		} else {
+			contentLength += 2
+		}
 	}
-	aarq = append(aarq, userData...)
+	
+	// User information
+	userInfoLength := 0
+	
+	// Single ASN1 type tag
+	userInfoLength += payloadLength
+	userInfoLength += 1 // tag
+	userInfoLength += ber.DetermineLengthSize(uint32(payloadLength)) // length
+	
+	// Indirect reference
+	userInfoLength += 1 // tag
+	userInfoLength += 2 // length + value (1 byte)
+	
+	// Association data
+	assocDataLength := userInfoLength
+	userInfoLength += ber.DetermineLengthSize(uint32(assocDataLength)) // length
+	userInfoLength += 1 // tag
+	
+	// User information wrapper
+	userInfoLen := userInfoLength
+	userInfoLength += ber.DetermineLengthSize(uint32(userInfoLength)) // length
+	userInfoLength += 1 // tag
+	
+	contentLength += userInfoLength
+	
+	// Allocate buffer with sufficient size
+	// We need contentLength + tag(1) + max length encoding(4) + some margin
+	bufferSize := contentLength + 20
+	buffer := make([]byte, bufferSize)
+	bufPos := 0
+	
+	// Encode AARQ tag and length
+	bufPos = ber.EncodeTL(0x60, uint32(contentLength), buffer, bufPos)
+	
+	// Application context name
+	bufPos = ber.EncodeTL(0xa1, 7, buffer, bufPos)
+	bufPos = ber.EncodeTL(0x06, 5, buffer, bufPos)
+	copy(buffer[bufPos:], appContextNameMms)
+	bufPos += 5
+	
+	// Called AP title and AE qualifier
+	if isoParams != nil && isoParams.RemoteAPTitleLen > 0 {
+		// Called AP title
+		calledAPTitleLength := isoParams.RemoteAPTitleLen + 2
+		bufPos = ber.EncodeTL(0xa2, uint32(calledAPTitleLength), buffer, bufPos)
+		bufPos = ber.EncodeTL(0x06, uint32(isoParams.RemoteAPTitleLen), buffer, bufPos)
+		copy(buffer[bufPos:], isoParams.RemoteAPTitle)
+		bufPos += isoParams.RemoteAPTitleLen
+		
+		// Called AE qualifier
+		calledAEQualifierLength := determineIntegerEncodedSize(int32(isoParams.RemoteAEQualifier))
+		bufPos = ber.EncodeTL(0xa3, uint32(calledAEQualifierLength+2), buffer, bufPos)
+		bufPos = ber.EncodeTL(0x02, uint32(calledAEQualifierLength), buffer, bufPos)
+		bufPos = encodeInteger(int32(isoParams.RemoteAEQualifier), buffer, bufPos)
+	}
+	
+	// Calling AP title and AE qualifier
+	if isoParams != nil && isoParams.LocalAPTitleLen > 0 {
+		// Calling AP title
+		callingAPTitleLength := isoParams.LocalAPTitleLen + 2
+		bufPos = ber.EncodeTL(0xa6, uint32(callingAPTitleLength), buffer, bufPos)
+		bufPos = ber.EncodeTL(0x06, uint32(isoParams.LocalAPTitleLen), buffer, bufPos)
+		copy(buffer[bufPos:], isoParams.LocalAPTitle)
+		bufPos += isoParams.LocalAPTitleLen
+		
+		// Calling AE qualifier
+		callingAEQualifierLength := determineIntegerEncodedSize(int32(isoParams.LocalAEQualifier))
+		bufPos = ber.EncodeTL(0xa7, uint32(callingAEQualifierLength+2), buffer, bufPos)
+		bufPos = ber.EncodeTL(0x02, uint32(callingAEQualifierLength), buffer, bufPos)
+		bufPos = encodeInteger(int32(isoParams.LocalAEQualifier), buffer, bufPos)
+	}
+	
+	// Authentication (if provided)
+	if authParam != nil {
+		// Sender requirements
+		bufPos = ber.EncodeTL(0x8a, 2, buffer, bufPos)
+		buffer[bufPos] = 0x04
+		bufPos++
+		
+		if authParam.Mechanism == AuthPassword {
+			buffer[bufPos] = requirementsAuthentication[0]
+			bufPos++
+			
+			// Mechanism name
+			bufPos = ber.EncodeTL(0x8b, 3, buffer, bufPos)
+			copy(buffer[bufPos:], authMechPasswordOID)
+			bufPos += 3
+			
+			// Authentication value
+			passwordLength := len(authParam.Password)
+			authValueStringLength := ber.DetermineLengthSize(uint32(passwordLength))
+			authValueLength := passwordLength + authValueStringLength + 1
+			bufPos = ber.EncodeTL(0xac, uint32(authValueLength), buffer, bufPos)
+			bufPos = ber.EncodeTL(0x80, uint32(passwordLength), buffer, bufPos)
+			copy(buffer[bufPos:], authParam.Password)
+			bufPos += passwordLength
+		} else {
+			buffer[bufPos] = 0
+			bufPos++
+		}
+	}
+	
+	// User information
+	bufPos = ber.EncodeTL(0xbe, uint32(userInfoLen), buffer, bufPos)
+	
+	// Association data
+	bufPos = ber.EncodeTL(0x28, uint32(assocDataLength), buffer, bufPos)
+	
+	// Indirect reference
+	bufPos = ber.EncodeTL(0x02, 1, buffer, bufPos)
+	buffer[bufPos] = 3
+	bufPos++
+	
+	// Single ASN1 type
+	bufPos = ber.EncodeTL(0xa0, uint32(payloadLength), buffer, bufPos)
+	
+	// Append payload
+	buffer = append(buffer[:bufPos], payload...)
+	bufPos += len(payload)
+	
+	return buffer[:bufPos]
+}
 
-	return aarq
+// ParseMessage parses an incoming ACSE message
+// Based on AcseConnection_parseMessage from acse.c
+func ParseMessage(conn *Connection, message []byte) (Indication, error) {
+	if len(message) < 1 {
+		return IndicationError, errors.New("invalid message - no payload")
+	}
+	
+	bufPos := 0
+	messageType := message[bufPos]
+	bufPos++
+	
+	newPos, _, err := ber.DecodeLength(message, bufPos, len(message))
+	if err != nil {
+		return IndicationError, fmt.Errorf("invalid ACSE message: %w", err)
+	}
+	bufPos = newPos
+	
+	switch messageType {
+	case 0x60: // AARQ
+		return parseAarqPdu(conn, message, bufPos, len(message))
+	case 0x61: // AARE
+		return parseAarePdu(conn, message, bufPos, len(message))
+	case 0x62: // A_RELEASE.request RLRQ-apdu
+		return IndicationReleaseRequest, nil
+	case 0x63: // A_RELEASE.response RLRE-apdu
+		return IndicationReleaseResponse, nil
+	case 0x64: // A_ABORT
+		return IndicationAbort, nil
+	case 0x00: // indefinite length end tag -> ignore
+		return IndicationError, errors.New("indefinite length end tag")
+	default:
+		return IndicationError, fmt.Errorf("unknown ACSE message type: 0x%02x", messageType)
+	}
+}
+
+// parseAarqPdu parses an AARQ PDU
+// Based on parseAarqPdu from acse.c
+func parseAarqPdu(conn *Connection, buffer []byte, bufPos, maxBufPos int) (Indication, error) {
+	// Note: authValue, authValueLen, authMechanism, authMechLen are declared but not used
+	// as authentication checking is simplified in this implementation
+	userInfoValid := false
+	
+	for bufPos < maxBufPos {
+		tag := buffer[bufPos]
+		bufPos++
+		
+		newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+		if err != nil {
+			return IndicationAssociateFailed, fmt.Errorf("invalid PDU: %w", err)
+		}
+		bufPos = newPos
+		
+		if length == 0 {
+			continue
+		}
+		
+		if bufPos+length > maxBufPos {
+			return IndicationAssociateFailed, errors.New("invalid PDU: buffer overflow")
+		}
+		
+		switch tag {
+		case 0xa1: // application context name
+			bufPos += length
+			
+		case 0xa2: // called AP title
+			bufPos += length
+			
+		case 0xa3: // called AE qualifier
+			bufPos += length
+			
+		case 0xa6: // calling AP title
+			if bufPos < maxBufPos && buffer[bufPos] == 0x06 {
+				// ap-title-form2
+				if bufPos+1 < maxBufPos {
+					innerLength := int(buffer[bufPos+1])
+					if innerLength == length-2 {
+						ber.DecodeOID(buffer, bufPos+2, innerLength, &conn.ApplicationRef.APTitle)
+					}
+				}
+			}
+			bufPos += length
+			
+		case 0xa7: // calling AE qualifier
+			if bufPos < maxBufPos && buffer[bufPos] == 0x02 {
+				// ae-qualifier-form2
+				if bufPos+1 < maxBufPos {
+					innerLength := int(buffer[bufPos+1])
+					if innerLength == length-2 {
+						conn.ApplicationRef.AEQualifier = ber.DecodeInt32(buffer, innerLength, bufPos+2)
+					}
+				}
+			}
+			bufPos += length
+			
+		case 0x8a: // sender ACSE requirements
+			bufPos += length
+			
+		case 0x8b: // (authentication) mechanism name
+			// Authentication mechanism parsing (not used in simplified implementation)
+			bufPos += length
+			
+		case 0xac: // authentication value
+			bufPos++ // skip tag
+			newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+			if err != nil {
+				return IndicationAssociateFailed, fmt.Errorf("invalid PDU: %w", err)
+			}
+			bufPos = newPos
+			
+			// Authentication value parsing (not used in simplified implementation)
+			bufPos += length
+			
+		case 0xbe: // user information
+			if bufPos < maxBufPos && buffer[bufPos] != 0x28 {
+				bufPos += length
+			} else {
+				bufPos++ // skip 0x28 tag
+				newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+				if err != nil {
+					return IndicationAssociateFailed, fmt.Errorf("invalid PDU: %w", err)
+				}
+				bufPos = newPos
+				
+				var parseErr error
+				bufPos, parseErr = parseUserInformation(conn, buffer, bufPos, bufPos+length, &userInfoValid)
+				if parseErr != nil {
+					return IndicationAssociateFailed, fmt.Errorf("invalid PDU: %w", parseErr)
+				}
+			}
+			
+		case 0x00: // indefinite length end tag -> ignore
+			break
+			
+		default:
+			bufPos += length
+		}
+	}
+	
+	// Check authentication (simplified - always accept for now)
+	// In full implementation, this would call checkAuthentication
+	
+	if !userInfoValid {
+		return IndicationAssociateFailed, errors.New("user info invalid")
+	}
+	
+	return IndicationAssociate, nil
+}
+
+// parseAarePdu parses an AARE PDU
+// Based on parseAarePdu from acse.c
+func parseAarePdu(conn *Connection, buffer []byte, bufPos, maxBufPos int) (Indication, error) {
+	userInfoValid := false
+	result := uint32(99)
+	
+	for bufPos < maxBufPos {
+		tag := buffer[bufPos]
+		bufPos++
+		
+		newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+		if err != nil {
+			return IndicationError, fmt.Errorf("invalid PDU: %w", err)
+		}
+		bufPos = newPos
+		
+		if length == 0 {
+			continue
+		}
+		
+		if bufPos+length > maxBufPos {
+			return IndicationError, errors.New("invalid PDU: buffer overflow")
+		}
+		
+		switch tag {
+		case 0xa1: // application context name
+			bufPos += length
+			
+		case 0xa2: // result
+			bufPos++ // skip tag
+			newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+			if err != nil {
+				return IndicationError, fmt.Errorf("invalid PDU: %w", err)
+			}
+			bufPos = newPos
+			
+			result = ber.DecodeUint32(buffer, length, bufPos)
+			bufPos += length
+			
+		case 0xa3: // result source diagnostic
+			bufPos += length
+			
+		case 0xbe: // user information
+			if bufPos < maxBufPos && buffer[bufPos] != 0x28 {
+				bufPos += length
+			} else {
+				bufPos++ // skip 0x28 tag
+				newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+				if err != nil {
+					return IndicationError, fmt.Errorf("invalid PDU: %w", err)
+				}
+				bufPos = newPos
+				
+				var parseErr error
+				bufPos, parseErr = parseUserInformation(conn, buffer, bufPos, bufPos+length, &userInfoValid)
+				if parseErr != nil {
+					return IndicationError, fmt.Errorf("invalid PDU: %w", parseErr)
+				}
+			}
+			
+		case 0x00: // indefinite length end tag -> ignore
+			break
+			
+		default:
+			bufPos += length
+		}
+	}
+	
+	if !userInfoValid {
+		return IndicationError, errors.New("user info invalid")
+	}
+	
+	if result != 0 {
+		return IndicationAssociateFailed, nil
+	}
+	
+	return IndicationAssociate, nil
+}
+
+// parseUserInformation parses user information from ACSE PDU
+// Based on parseUserInformation from acse.c
+func parseUserInformation(conn *Connection, buffer []byte, bufPos, maxBufPos int, userInfoValid *bool) (int, error) {
+	hasIndirectReference := false
+	isDataValid := false
+	
+	for bufPos < maxBufPos {
+		tag := buffer[bufPos]
+		bufPos++
+		
+		newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+		if err != nil {
+			*userInfoValid = false
+			return -1, err
+		}
+		bufPos = newPos
+		
+		if length == 0 {
+			continue
+		}
+		
+		if bufPos < 0 || bufPos+length > maxBufPos {
+			*userInfoValid = false
+			return -1, errors.New("buffer overflow")
+		}
+		
+		switch tag {
+		case 0x02: // indirect-reference
+			conn.NextReference = ber.DecodeUint32(buffer, length, bufPos)
+			bufPos += length
+			hasIndirectReference = true
+			
+		case 0xa0: // encoding
+			isDataValid = true
+			conn.UserDataBufferSize = length
+			conn.UserDataBuffer = buffer[bufPos : bufPos+length]
+			bufPos += length
+			
+		default: // ignore unknown tag
+			bufPos += length
+		}
+	}
+	
+	if hasIndirectReference && isDataValid {
+		*userInfoValid = true
+	} else {
+		*userInfoValid = false
+	}
+	
+	return bufPos, nil
+}
+
+// CreateAssociateResponseMessage creates an AARE (Association Response) PDU
+// Based on AcseConnection_createAssociateResponseMessage from acse.c
+func CreateAssociateResponseMessage(conn *Connection, acseResult uint8, payload []byte) []byte {
+	appContextLength := 9
+	resultLength := 5
+	resultDiagnosticLength := 5
+	
+	fixedContentLength := appContextLength + resultLength + resultDiagnosticLength
+	
+	variableContentLength := 0
+	
+	payloadLength := len(payload)
+	
+	// Single ASN1 type tag
+	variableContentLength += payloadLength
+	variableContentLength += 1 // tag
+	variableContentLength += ber.DetermineLengthSize(uint32(payloadLength)) // length
+	
+	// Indirect reference
+	nextRefLength := ber.UInt32DetermineEncodedSize(conn.NextReference)
+	variableContentLength += nextRefLength
+	variableContentLength += 2 // tag + length
+	
+	// Association data
+	assocDataLength := variableContentLength
+	variableContentLength += ber.DetermineLengthSize(uint32(assocDataLength)) // length
+	variableContentLength += 1 // tag
+	
+	// User information
+	userInfoLength := variableContentLength
+	variableContentLength += ber.DetermineLengthSize(uint32(userInfoLength)) // length
+	variableContentLength += 1 // tag
+	
+	variableContentLength += 2 // user information tag
+	
+	contentLength := fixedContentLength + variableContentLength
+	
+	buffer := make([]byte, 0, contentLength+10)
+	bufPos := 0
+	
+	// Encode AARE tag and length
+	bufPos = ber.EncodeTL(0x61, uint32(contentLength), buffer, bufPos)
+	buffer = buffer[:bufPos+contentLength]
+	bufPos = 0
+	bufPos = ber.EncodeTL(0x61, uint32(contentLength), buffer, bufPos)
+	
+	// Application context name
+	bufPos = ber.EncodeTL(0xa1, 7, buffer, bufPos)
+	bufPos = ber.EncodeTL(0x06, 5, buffer, bufPos)
+	copy(buffer[bufPos:], appContextNameMms)
+	bufPos += 5
+	
+	// Result
+	bufPos = ber.EncodeTL(0xa2, 3, buffer, bufPos)
+	bufPos = ber.EncodeTL(0x02, 1, buffer, bufPos)
+	buffer[bufPos] = acseResult
+	bufPos++
+	
+	// Result source diagnostics
+	bufPos = ber.EncodeTL(0xa3, 5, buffer, bufPos)
+	bufPos = ber.EncodeTL(0xa1, 3, buffer, bufPos)
+	bufPos = ber.EncodeTL(0x02, 1, buffer, bufPos)
+	buffer[bufPos] = 0
+	bufPos++
+	
+	// User information
+	bufPos = ber.EncodeTL(0xbe, uint32(userInfoLength), buffer, bufPos)
+	
+	// Association data
+	bufPos = ber.EncodeTL(0x28, uint32(assocDataLength), buffer, bufPos)
+	
+	// Indirect reference
+	bufPos = ber.EncodeTL(0x02, uint32(nextRefLength), buffer, bufPos)
+	bufPos = ber.EncodeUInt32(conn.NextReference, buffer, bufPos)
+	
+	// Single ASN1 type
+	bufPos = ber.EncodeTL(0xa0, uint32(payloadLength), buffer, bufPos)
+	
+	// Append payload
+	buffer = append(buffer[:bufPos], payload...)
+	bufPos += len(payload)
+	
+	return buffer[:bufPos]
+}
+
+// CreateAssociateFailedMessage creates an AARE with reject permanent result
+func CreateAssociateFailedMessage(conn *Connection, payload []byte) []byte {
+	return CreateAssociateResponseMessage(conn, ResultRejectPermanent, payload)
+}
+
+// CreateAbortMessage creates an A_ABORT PDU
+func CreateAbortMessage(conn *Connection, isProvider bool) []byte {
+	buffer := make([]byte, 5)
+	buffer[0] = 0x64 // [APPLICATION 4]
+	buffer[1] = 3
+	buffer[2] = 0x80
+	buffer[3] = 1
+	
+	if isProvider {
+		buffer[4] = 1
+	} else {
+		buffer[4] = 0
+	}
+	
+	return buffer
+}
+
+// CreateReleaseRequestMessage creates an A_RELEASE.request PDU
+func CreateReleaseRequestMessage(conn *Connection) []byte {
+	buffer := make([]byte, 5)
+	buffer[0] = 0x62
+	buffer[1] = 3
+	buffer[2] = 0x80
+	buffer[3] = 1
+	buffer[4] = 0
+	return buffer
+}
+
+// CreateReleaseResponseMessage creates an A_RELEASE.response PDU
+func CreateReleaseResponseMessage(conn *Connection) []byte {
+	buffer := make([]byte, 2)
+	buffer[0] = 0x63
+	buffer[1] = 0
+	return buffer
+}
+
+// determineIntegerEncodedSize determines the encoded size of an integer
+// For small values (0-127), returns 1 byte
+func determineIntegerEncodedSize(value int32) int {
+	if value >= 0 && value < 128 {
+		return 1
+	}
+	if value < 0 && value >= -128 {
+		return 1
+	}
+	// For larger values, use the standard BER encoding
+	return ber.Int32DetermineEncodedSize(value)
+}
+
+// encodeInteger encodes an integer value in BER format
+// For small values (0-127), encodes as 1 byte
+func encodeInteger(value int32, buffer []byte, bufPos int) int {
+	if value >= 0 && value < 128 {
+		buffer[bufPos] = byte(value)
+		return bufPos + 1
+	}
+	if value < 0 && value >= -128 {
+		buffer[bufPos] = byte(value)
+		return bufPos + 1
+	}
+	// For larger values, use the standard BER encoding
+	return ber.EncodeInt32(value, buffer, bufPos)
 }
