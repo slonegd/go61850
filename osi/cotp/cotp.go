@@ -1,6 +1,7 @@
 package cotp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -669,9 +670,15 @@ func (c *Connection) SendDataMessage(payload []byte) error {
 }
 
 // ReadToTpktBuffer читает данные в TPKT буфер
-func (c *Connection) ReadToTpktBuffer() (TpktState, error) {
+// Проверяет контекст перед блокирующими операциями чтения
+func (c *Connection) ReadToTpktBuffer(ctx context.Context) (TpktState, error) {
 	if cap(c.readBuffer) < 4 {
 		return TpktError, errors.New("read buffer too small")
+	}
+
+	// Проверяем контекст перед началом операции
+	if ctx.Err() != nil {
+		return TpktError, ctx.Err()
 	}
 
 	bufPos := len(c.readBuffer)
@@ -688,6 +695,11 @@ func (c *Connection) ReadToTpktBuffer() (TpktState, error) {
 
 	// Читаем TPKT заголовок (4 байта)
 	if bufPos < 4 {
+		// Проверяем контекст перед блокирующим чтением
+		if ctx.Err() != nil {
+			return TpktError, ctx.Err()
+		}
+
 		readBytes := make([]byte, 4-bufPos)
 		n, err := c.conn.Read(readBytes)
 		if err != nil {
@@ -728,6 +740,11 @@ func (c *Connection) ReadToTpktBuffer() (TpktState, error) {
 	if bufPos >= int(c.packetSize) {
 		// Пакет уже полностью прочитан
 		return TpktPacketComplete, nil
+	}
+
+	// Проверяем контекст перед блокирующим чтением остатка пакета
+	if ctx.Err() != nil {
+		return TpktError, ctx.Err()
 	}
 
 	readBytes := make([]byte, int(c.packetSize)-bufPos)

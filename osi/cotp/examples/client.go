@@ -67,7 +67,7 @@ func (c *Client) waitForConnection(timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		select {
 		case <-ticker.C:
-			state, err := c.cotpConn.ReadToTpktBuffer()
+			state, err := c.cotpConn.ReadToTpktBuffer(context.Background())
 			if err != nil {
 				if err == io.EOF {
 					return fmt.Errorf("connection closed")
@@ -122,7 +122,7 @@ func (c *Client) ReceiveData(timeout time.Duration) ([]byte, error) {
 	for time.Now().Before(deadline) {
 		select {
 		case <-ticker.C:
-			state, err := c.cotpConn.ReadToTpktBuffer()
+			state, err := c.cotpConn.ReadToTpktBuffer(context.Background())
 			if err != nil {
 				if err == io.EOF {
 					return nil, fmt.Errorf("connection closed")

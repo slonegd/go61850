@@ -1,0 +1,48 @@
+{
+  "package": "go61850",
+  "description": "Main package providing MMS client interface for IEC 61850 protocol",
+  "imports": [
+    "context",
+    "fmt",
+    "net",
+    "github.com/slonegd/go61850/osi/acse",
+    "github.com/slonegd/go61850/osi/cotp",
+    "github.com/slonegd/go61850/osi/mms",
+    "github.com/slonegd/go61850/osi/presentation",
+    "github.com/slonegd/go61850/osi/session"
+  ],
+  "types": {
+    "MmsClient": {
+      "type": "struct",
+      "fields": [
+        {"name": "conn", "type": "net.Conn", "description": "Network connection"},
+        {"name": "cotpConn", "type": "*cotp.Connection", "description": "COTP connection instance"},
+        {"name": "logger", "type": "cotp.Logger", "description": "Optional logger for debugging"}
+      ],
+      "methods": [
+        {
+          "name": "Initiate",
+          "signature": "Initiate(ctx context.Context) error",
+          "description": "Establishes COTP connection, sends MMS Initiate Request and receives response"
+        }
+      ]
+    },
+    "MmsClientOption": {
+      "type": "func(*MmsClient)",
+      "description": "Option function for configuring MmsClient"
+    }
+  },
+  "functions": [
+    {
+      "name": "NewMmsClient",
+      "signature": "NewMmsClient(conn net.Conn, opts ...MmsClientOption) *MmsClient",
+      "description": "Creates new MMS client with optional configuration"
+    },
+    {
+      "name": "WithLogger",
+      "signature": "WithLogger(logger cotp.Logger) MmsClientOption",
+      "description": "Sets logger for MmsClient"
+    }
+  ]
+}
+

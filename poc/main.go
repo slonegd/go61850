@@ -200,107 +200,25 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net"
 	"time"
 
-	"github.com/slonegd/go61850/osi/acse"
+	"github.com/slonegd/go61850"
 	"github.com/slonegd/go61850/osi/cotp"
-	"github.com/slonegd/go61850/osi/mms"
-	"github.com/slonegd/go61850/osi/presentation"
-	"github.com/slonegd/go61850/osi/session"
 )
 
 // proofOfConcept выполняет Proof of Concept: устанавливает COTP соединение,
 // отправляет MMS Initiate Request и получает ответ.
 func proofOfConcept(conn net.Conn, logger cotp.Logger) error {
-	// Создаём COTP соединение
-	ops := []cotp.ConnectionOption{}
+	opts := []go61850.MmsClientOption{}
 	if logger != nil {
-		ops = append(ops, cotp.WithLogger(logger))
+		opts = append(opts, go61850.WithLogger(logger))
 	}
-	cotpConn := cotp.NewConnection(conn, ops...)
+	client := go61850.NewMmsClient(conn, opts...)
 
-	// --- Шаг 1: Отправка COTP CR TPDU ---
-	params := &cotp.IsoConnectionParameters{
-		RemoteTSelector: cotp.TSelector{Value: []byte{0, 1}},
-		LocalTSelector:  cotp.TSelector{Value: []byte{0, 1}},
-	}
-
-	err := cotpConn.SendConnectionRequestMessage(params)
-	if err != nil {
-		return fmt.Errorf("failed to send COTP CR: %w", err)
-	}
-
-	// --- Шаг 2: Получение COTP CC TPDU ---
-	for {
-		state, err := cotpConn.ReadToTpktBuffer()
-		if err != nil {
-			return fmt.Errorf("failed to read TPKT: %w", err)
-		}
-
-		if state == cotp.TpktPacketComplete {
-			indication, err := cotpConn.ParseIncomingMessage()
-			if err != nil {
-				return fmt.Errorf("failed to parse COTP message: %w", err)
-			}
-
-			if indication == cotp.IndicationConnect {
-				break
-			}
-		} else if state == cotp.TpktError {
-			return fmt.Errorf("TPKT read error")
-		}
-	}
-
-	// --- Шаг 3: Создание полного пакета MMS Initiate Request ---
-	// Порядок вложенности: MMS -> ACSE -> Presentation -> Session -> COTP
-
-	// 1. Создаём MMS InitiateRequestPDU
-	mmsPdu := mms.BuildInitiateRequestPDU()
-
-	// 2. Обёртываем в ACSE AARQ
-	acsePdu := acse.BuildAARQ(mmsPdu)
-
-	// 3. Обёртываем в Presentation CP-type
-	presentationPdu := presentation.BuildCPType(acsePdu)
-
-	// 4. Обёртываем в Session CONNECT SPDU
-	sessionPdu := session.BuildConnectSPDU(presentationPdu)
-
-	// 5. Отправляем через COTP
-	err = cotpConn.SendDataMessage(sessionPdu)
-	if err != nil {
-		return fmt.Errorf("failed to send data: %w", err)
-	}
-
-	// --- Шаг 4: Получение ответа ---
-	for {
-		state, err := cotpConn.ReadToTpktBuffer()
-		if err != nil {
-			return fmt.Errorf("failed to read TPKT: %w", err)
-		}
-
-		if state == cotp.TpktPacketComplete {
-			indication, err := cotpConn.ParseIncomingMessage()
-			if err != nil {
-				return fmt.Errorf("failed to parse COTP message: %w", err)
-			}
-
-			if indication == cotp.IndicationData {
-				cotpConn.ResetPayload()
-				break
-			} else if indication == cotp.IndicationMoreFragmentsFollow {
-				// Продолжаем читать фрагменты
-				continue
-			}
-		} else if state == cotp.TpktError {
-			return fmt.Errorf("TPKT read error")
-		}
-	}
-
-	return nil
+	ctx := context.Background()
+	return client.Initiate(ctx)
 }
 
 func main() {

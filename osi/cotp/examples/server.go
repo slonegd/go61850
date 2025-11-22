@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -113,7 +114,7 @@ func (s *Server) waitForConnectionRequest(cotpConn *cotp.Connection, timeout tim
 	for time.Now().Before(deadline) {
 		select {
 		case <-ticker.C:
-			state, err := cotpConn.ReadToTpktBuffer()
+			state, err := cotpConn.ReadToTpktBuffer(context.Background())
 			if err != nil {
 				if err == io.EOF {
 					return fmt.Errorf("connection closed")
@@ -161,7 +162,7 @@ func (c *Connection) ReceiveData(timeout time.Duration) ([]byte, error) {
 	for time.Now().Before(deadline) {
 		select {
 		case <-ticker.C:
-			state, err := c.cotpConn.ReadToTpktBuffer()
+			state, err := c.cotpConn.ReadToTpktBuffer(context.Background())
 			if err != nil {
 				if err == io.EOF {
 					return nil, fmt.Errorf("connection closed")
