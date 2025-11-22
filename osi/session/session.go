@@ -1,87 +1,182 @@
 package session
 
-// BuildConnectSPDU создаёт CONNECT SPDU (Session Protocol Data Unit).
-// Возвращает захардкоженный CONNECT SPDU согласно спецификации из poc/main.go.
-func BuildConnectSPDU(userData []byte) []byte {
-	// CONNECT SPDU согласно комментарию в poc/main.go:
-	// SPDU Type: CONNECT (CN) SPDU (13) | Length: 178
-	// 0d b2
-	// Connect Accept Item
-	// Parameter type: Connect Accept Item (5) | Parameter length: 6
-	// Protocol Options: Parameter type: Protocol Options (19) | Parameter length: 1 | Flags: 0x00
-	// Version Number: Parameter type: Version Number (22) | Parameter length: 1 | Flags: 0x02, Protocol Version 2
-	// 05 06 13 01 00 16 01 02
-	// Session Requirement
-	// Parameter type: Session Requirement (20)
-	// Parameter length: 2
-	// Flags: 0x0002, Duplex functional unit
-	// 14 02 00 02
-	// Calling Session Selector
-	// Parameter type: Calling Session Selector (51)
-	// Parameter length: 2
-	// Calling Session Selector: 0001
-	// 33 02 00 01
-	// Called Session Selector
-	// Parameter type: Called Session Selector (52)
-	// Parameter length: 2
-	// Called Session Selector: 0001
-	// 34 02 00 01
-	// Session user data
-	// Parameter type: Session user data (193)
-	// Parameter length: <длина userData>
-	// c1 <length> <userData>
-
-	spdu := []byte{}
-
-	// SPDU Type: CONNECT (CN) = 0x0D
-	spdu = append(spdu, 0x0D)
-
-	// Вычисляем общую длину SPDU
-	// Connect Accept Item: 8 байт (05 06 13 01 00 16 01 02)
-	// Session Requirement: 4 байта (14 02 00 02)
-	// Calling Session Selector: 4 байта (33 02 00 01)
-	// Called Session Selector: 4 байта (34 02 00 01)
-	// Session user data: 2 байта заголовок + длина userData
-	fixedPartLength := 8 + 4 + 4 + 4 + 2 + len(userData)
-	totalLength := fixedPartLength
-
-	// Добавляем длину Session SPDU
-	// ПРИМЕЧАНИЕ: В Session Protocol длина кодируется в коротком формате для значений <= 255
-	// Согласно дампу из Wireshark: 0d b2 (длина 178 в коротком формате, хотя 178 >= 128)
-	// Это особенность Session Protocol - короткий формат используется до 255, а не до 127
-	if totalLength <= 0xFF {
-		spdu = append(spdu, byte(totalLength))
-	} else {
-		// Для длин > 255 используем длинный формат
-		spdu = append(spdu, 0x82, byte(totalLength>>8), byte(totalLength&0xFF))
-	}
-
-	// Connect Accept Item
-	spdu = append(spdu, 0x05, 0x06, 0x13, 0x01, 0x00, 0x16, 0x01, 0x02)
-
-	// Session Requirement
-	spdu = append(spdu, 0x14, 0x02, 0x00, 0x02)
-
-	// Calling Session Selector
-	spdu = append(spdu, 0x33, 0x02, 0x00, 0x01)
-
-	// Called Session Selector
-	spdu = append(spdu, 0x34, 0x02, 0x00, 0x01)
-
-	// Session user data
-	// ПРИМЕЧАНИЕ: В Session Protocol длина параметра кодируется в коротком формате
-	// даже для значений >= 128 (в отличие от BER, где используется длинный формат)
-	// Согласно дампу из Wireshark: c1 9c (длина 156 в коротком формате)
-	spdu = append(spdu, 0xC1) // Parameter type: Session user data (193)
-	// Используем короткий формат для длины (как в дампе из Wireshark)
-	if len(userData) <= 0xFF {
-		spdu = append(spdu, byte(len(userData)))
-	} else {
-		// Для длин > 255 используем длинный формат
-		spdu = append(spdu, 0x82, byte(len(userData)>>8), byte(len(userData)&0xFF))
-	}
-	spdu = append(spdu, userData...)
-
-	return spdu
+// SSelector представляет селектор сессии
+type SSelector struct {
+	Value []byte
 }
 
+// Session представляет состояние сессии ISO 8327-1
+type Session struct {
+	callingSessionSelector SSelector
+	calledSessionSelector  SSelector
+	sessionRequirement     uint16
+	protocolOptions        uint8
+}
+
+// NewSession создаёт новую сессию с параметрами по умолчанию
+// Согласно IsoSession_init из C библиотеки:
+// - sessionRequirement = 0x0002 (duplex functional unit)
+// - callingSessionSelector = [0, 1]
+// - calledSessionSelector = [0, 1]
+// - protocolOptions = 0
+func NewSession() *Session {
+	return &Session{
+		sessionRequirement: 0x0002, // duplex functional unit
+		callingSessionSelector: SSelector{
+			Value: []byte{0, 1},
+		},
+		calledSessionSelector: SSelector{
+			Value: []byte{0, 1},
+		},
+		protocolOptions: 0,
+	}
+}
+
+// encodeConnectAcceptItem кодирует Connect Accept Item
+// Согласно encodeConnectAcceptItem из C библиотеки (строки 259-272)
+func encodeConnectAcceptItem(buf []byte, offset int, options uint8) int {
+	buf[offset] = 5 // Connect Accept Item
+	offset++
+	buf[offset] = 6 // Parameter length: 6
+	offset++
+	buf[offset] = 0x13 // Protocol Options
+	offset++
+	buf[offset] = 1 // Length: 1
+	offset++
+	buf[offset] = options // Protocol options value
+	offset++
+	buf[offset] = 0x16 // Version Number
+	offset++
+	buf[offset] = 1 // Length: 1
+	offset++
+	buf[offset] = 2 // Version = 2
+	offset++
+	return offset
+}
+
+// encodeSessionRequirement кодирует Session Requirement
+// Согласно encodeSessionRequirement из C библиотеки (строки 289-298)
+func encodeSessionRequirement(session *Session, buf []byte, offset int) int {
+	buf[offset] = 0x14 // Session Requirement
+	offset++
+	buf[offset] = 2 // Length: 2
+	offset++
+	buf[offset] = byte(session.sessionRequirement >> 8) // High byte
+	offset++
+	buf[offset] = byte(session.sessionRequirement & 0xff) // Low byte
+	offset++
+	return offset
+}
+
+// encodeCallingSessionSelector кодирует Calling Session Selector
+// Согласно encodeCallingSessionSelector из C библиотеки (строки 300-311)
+func encodeCallingSessionSelector(session *Session, buf []byte, offset int) int {
+	buf[offset] = 0x33 // Calling Session Selector
+	offset++
+	buf[offset] = byte(len(session.callingSessionSelector.Value)) // Size
+	offset++
+	for i := 0; i < len(session.callingSessionSelector.Value); i++ {
+		buf[offset] = session.callingSessionSelector.Value[i]
+		offset++
+	}
+	return offset
+}
+
+// encodeCalledSessionSelector кодирует Called Session Selector
+// Согласно encodeCalledSessionSelector из C библиотеки (строки 313-324)
+func encodeCalledSessionSelector(session *Session, buf []byte, offset int) int {
+	buf[offset] = 0x34 // Called Session Selector
+	offset++
+	buf[offset] = byte(len(session.calledSessionSelector.Value)) // Size
+	offset++
+	for i := 0; i < len(session.calledSessionSelector.Value); i++ {
+		buf[offset] = session.calledSessionSelector.Value[i]
+		offset++
+	}
+	return offset
+}
+
+// encodeSessionUserData кодирует Session User Data
+// Согласно encodeSessionUserData из C библиотеки (строки 326-333)
+func encodeSessionUserData(buf []byte, offset int, payloadLength int) int {
+	buf[offset] = 0xc1 // Session user data
+	offset++
+	// В Session Protocol длина параметра кодируется в коротком формате
+	// даже для значений >= 128 (в отличие от BER)
+	if payloadLength <= 0xFF {
+		buf[offset] = byte(payloadLength)
+		offset++
+	} else {
+		// Для длин > 255 используем длинный формат
+		buf[offset] = 0x82
+		offset++
+		buf[offset] = byte(payloadLength >> 8)
+		offset++
+		buf[offset] = byte(payloadLength & 0xff)
+		offset++
+	}
+	return offset
+}
+
+// BuildConnectSPDU создаёт CONNECT SPDU (Session Protocol Data Unit).
+// Реализация основана на IsoSession_createConnectSpdu из C библиотеки (строки 335-367).
+// Использует значения по умолчанию, соответствующие IsoSession_init.
+func BuildConnectSPDU(userData []byte) []byte {
+	session := NewSession()
+	return buildConnectSPDUWithSession(session, userData)
+}
+
+// buildConnectSPDUWithSession создаёт CONNECT SPDU с использованием указанной сессии
+func buildConnectSPDUWithSession(session *Session, userData []byte) []byte {
+	// Вычисляем размер буфера заранее
+	// SPDU Type (1) + Length (1) + Connect Accept Item (8) + Session Requirement (4) +
+	// Calling Session Selector (2 + len) + Called Session Selector (2 + len) +
+	// Session User Data (1-3 + len)
+	connectAcceptItemLen := 8
+	sessionRequirementLen := 4
+	callingSelectorLen := 2 + len(session.callingSessionSelector.Value)
+	calledSelectorLen := 2 + len(session.calledSessionSelector.Value)
+	userDataHeaderLen := 2 // Обычно 2 байта (0xc1 + длина)
+	if len(userData) > 0xFF {
+		userDataHeaderLen = 4 // Длинный формат для длины > 255
+	}
+
+	totalHeaderLen := 1 + 1 + connectAcceptItemLen + sessionRequirementLen +
+		callingSelectorLen + calledSelectorLen + userDataHeaderLen
+
+	buf := make([]byte, totalHeaderLen+len(userData))
+	offset := 0
+
+	// SPDU Type: CONNECT (CN) = 13
+	buf[offset] = 13
+	offset++
+	lengthOffset := offset
+	offset++ // Пропускаем байт для длины - заполним позже
+
+	// Connect Accept Item
+	offset = encodeConnectAcceptItem(buf, offset, session.protocolOptions)
+
+	// Session Requirement
+	offset = encodeSessionRequirement(session, buf, offset)
+
+	// Calling Session Selector
+	offset = encodeCallingSessionSelector(session, buf, offset)
+
+	// Called Session Selector
+	offset = encodeCalledSessionSelector(session, buf, offset)
+
+	// Session User Data
+	offset = encodeSessionUserData(buf, offset, len(userData))
+
+	// Копируем userData
+	copy(buf[offset:], userData)
+	offset += len(userData)
+
+	// Вычисляем и записываем длину SPDU
+	// Длина = (offset - lengthOffset - 1) + len(userData)
+	// Но userData уже включен в offset, поэтому:
+	spduLength := offset - lengthOffset - 1
+	buf[lengthOffset] = byte(spduLength)
+
+	return buf[:offset]
+}

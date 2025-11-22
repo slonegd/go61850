@@ -1,0 +1,67 @@
+{
+  "package": "session",
+  "description": "ISO 8327-1 OSI Session Protocol implementation for IEC 61850, based on libIEC61850 C library",
+  "imports": [],
+  "types": {
+    "SSelector": {
+      "type": "struct",
+      "description": "Represents session selector",
+      "fields": [
+        {"name": "Value", "type": "[]byte"}
+      ]
+    },
+    "Session": {
+      "type": "struct",
+      "description": "Represents ISO 8327-1 session state",
+      "fields": [
+        {"name": "callingSessionSelector", "type": "SSelector", "private": true},
+        {"name": "calledSessionSelector", "type": "SSelector", "private": true},
+        {"name": "sessionRequirement", "type": "uint16", "private": true},
+        {"name": "protocolOptions", "type": "uint8", "private": true}
+      ],
+      "methods": []
+    }
+  },
+  "functions": {
+    "NewSession": {
+      "signature": "NewSession() *Session",
+      "description": "Creates a new session with default parameters (sessionRequirement=0x0002, selectors=[0,1], protocolOptions=0)"
+    },
+    "BuildConnectSPDU": {
+      "signature": "BuildConnectSPDU(userData []byte) []byte",
+      "description": "Creates CONNECT SPDU (Session Protocol Data Unit) based on IsoSession_createConnectSpdu from C library. Uses default session parameters."
+    },
+    "encodeConnectAcceptItem": {
+      "signature": "encodeConnectAcceptItem(buf []byte, offset int, options uint8) int",
+      "description": "Encodes Connect Accept Item parameter (private function)",
+      "private": true
+    },
+    "encodeSessionRequirement": {
+      "signature": "encodeSessionRequirement(session *Session, buf []byte, offset int) int",
+      "description": "Encodes Session Requirement parameter (private function)",
+      "private": true
+    },
+    "encodeCallingSessionSelector": {
+      "signature": "encodeCallingSessionSelector(session *Session, buf []byte, offset int) int",
+      "description": "Encodes Calling Session Selector parameter (private function)",
+      "private": true
+    },
+    "encodeCalledSessionSelector": {
+      "signature": "encodeCalledSessionSelector(session *Session, buf []byte, offset int) int",
+      "description": "Encodes Called Session Selector parameter (private function)",
+      "private": true
+    },
+    "encodeSessionUserData": {
+      "signature": "encodeSessionUserData(buf []byte, offset int, payloadLength int) int",
+      "description": "Encodes Session User Data parameter (private function)",
+      "private": true
+    },
+    "buildConnectSPDUWithSession": {
+      "signature": "buildConnectSPDUWithSession(session *Session, userData []byte) []byte",
+      "description": "Creates CONNECT SPDU using specified session (private function)",
+      "private": true
+    }
+  },
+  "constants": {}
+}
+

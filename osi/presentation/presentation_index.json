@@ -1,0 +1,66 @@
+{
+  "package": "presentation",
+  "description": "ISO 8823 OSI Presentation Protocol implementation for IEC 61850, based on libIEC61850 C library",
+  "imports": [
+    "github.com/slonegd/go61850/ber"
+  ],
+  "types": {
+    "PSelector": {
+      "type": "struct",
+      "description": "Represents presentation selector",
+      "fields": [
+        {"name": "Value", "type": "[]byte"}
+      ]
+    },
+    "Presentation": {
+      "type": "struct",
+      "description": "Represents ISO 8823 presentation state",
+      "fields": [
+        {"name": "callingPresentationSelector", "type": "PSelector", "private": true},
+        {"name": "calledPresentationSelector", "type": "PSelector", "private": true},
+        {"name": "acseContextId", "type": "uint8", "private": true},
+        {"name": "mmsContextId", "type": "uint8", "private": true},
+        {"name": "nextContextId", "type": "uint8", "private": true}
+      ],
+      "methods": []
+    }
+  },
+  "functions": {
+    "NewPresentation": {
+      "signature": "NewPresentation() *Presentation",
+      "description": "Creates a new presentation with default parameters (acseContextId=1, mmsContextId=3, selectors=[0,0,0,1])"
+    },
+    "BuildCPType": {
+      "signature": "BuildCPType(userData []byte) []byte",
+      "description": "Creates CP-type (Connect Presentation) PDU based on IsoPresentation_createConnectPdu from C library. Uses default presentation parameters."
+    },
+    "encodeUserData": {
+      "signature": "encodeUserData(presentation *Presentation, userData []byte, buf []byte, bufPos int, encode bool) int",
+      "description": "Encodes user data (private function, corresponds to encodeUserData from C library)",
+      "private": true
+    },
+    "createConnectPdu": {
+      "signature": "createConnectPdu(presentation *Presentation, userData []byte) []byte",
+      "description": "Creates CP-type PDU using specified presentation (private function, corresponds to createConnectPdu from C library)",
+      "private": true
+    }
+  },
+  "constants": {
+    "asnIDAsACSE": {
+      "value": "[0x52, 0x01, 0x00, 0x01]",
+      "type": "[]byte",
+      "description": "OID for id-as-acse (2.2.1.0.1)"
+    },
+    "asnIDMMS": {
+      "value": "[0x28, 0xca, 0x22, 0x02, 0x01]",
+      "type": "[]byte",
+      "description": "OID for mms-abstract-syntax-version1 (1.0.9506.2.1)"
+    },
+    "berID": {
+      "value": "[0x51, 0x01]",
+      "type": "[]byte",
+      "description": "OID for basic-encoding (2.1.1)"
+    }
+  }
+}
+
