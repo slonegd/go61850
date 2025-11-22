@@ -7,7 +7,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/slonegd/go61850/cotp"
+	"github.com/slonegd/go61850/osi/cotp"
 )
 
 // Client представляет COTP клиента

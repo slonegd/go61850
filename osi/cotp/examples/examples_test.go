@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/slonegd/go61850/cotp"
+	"github.com/slonegd/go61850/osi/cotp"
 )
 
 func TestConnectionRequestAndConfirm(t *testing.T) {

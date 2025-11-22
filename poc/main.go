@@ -205,18 +205,22 @@ import (
 	"net"
 	"time"
 
-	"github.com/slonegd/go61850/acse"
-	"github.com/slonegd/go61850/cotp"
-	"github.com/slonegd/go61850/mms"
-	"github.com/slonegd/go61850/presentation"
-	"github.com/slonegd/go61850/session"
+	"github.com/slonegd/go61850/osi/acse"
+	"github.com/slonegd/go61850/osi/cotp"
+	"github.com/slonegd/go61850/osi/mms"
+	"github.com/slonegd/go61850/osi/presentation"
+	"github.com/slonegd/go61850/osi/session"
 )
 
 // proofOfConcept выполняет Proof of Concept: устанавливает COTP соединение,
 // отправляет MMS Initiate Request и получает ответ.
 func proofOfConcept(conn net.Conn, logger cotp.Logger) error {
 	// Создаём COTP соединение
-	cotpConn := cotp.NewConnection(conn, cotp.WithLogger(logger))
+	ops := []cotp.ConnectionOption{}
+	if logger != nil {
+		ops = append(ops, cotp.WithLogger(logger))
+	}
+	cotpConn := cotp.NewConnection(conn, ops...)
 
 	// --- Шаг 1: Отправка COTP CR TPDU ---
 	params := &cotp.IsoConnectionParameters{
@@ -311,12 +315,12 @@ func main() {
 	}
 	defer conn.Close()
 
-	fmt.Printf("Connected to %s\n", address)
+	log.Printf("Connected to %s\n", address)
 
 	err = proofOfConcept(conn, nil)
 	if err != nil {
 		log.Fatalf("Proof of Concept failed: %v", err)
 	}
 
-	fmt.Println("Proof of Concept completed successfully")
+	log.Println("Proof of Concept completed successfully")
 }

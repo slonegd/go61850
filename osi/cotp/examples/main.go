@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/slonegd/go61850/cotp"
+	"github.com/slonegd/go61850/osi/cotp"
 )
 
 // AppLogger реализует интерфейс Logger - просто выводит сообщения
