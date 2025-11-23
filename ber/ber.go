@@ -474,23 +474,33 @@ func CompressInteger(integer []byte) int {
 	return newSize
 }
 
-// EncodeUInt32 encodes an unsigned 32-bit integer in BER format
+// EncodeUInt32 encodes an unsigned 32-bit integer in BER format (compact representation)
 func EncodeUInt32(value uint32, buffer []byte, bufPos int) int {
-	valueArray := make([]byte, 4)
-	binary.BigEndian.PutUint32(valueArray, value)
-
-	valueBuffer := make([]byte, 5)
-	valueBuffer[0] = 0
-	copy(valueBuffer[1:], valueArray)
-
-	if isLittleEndian() {
-		RevertByteOrder(valueBuffer[1:])
+	// Encode value in big-endian, removing leading zeros
+	if value == 0 {
+		buffer[bufPos] = 0
+		return bufPos + 1
 	}
 
-	size := CompressInteger(valueBuffer)
+	// Find the number of bytes needed
+	var bytes [4]byte
+	binary.BigEndian.PutUint32(bytes[:], value)
 
-	for i := 0; i < size; i++ {
-		buffer[bufPos] = valueBuffer[i]
+	// Skip leading zero bytes
+	start := 0
+	for start < 4 && bytes[start] == 0 {
+		start++
+	}
+
+	// If high bit is set on first byte, we need a leading zero for signed representation
+	if bytes[start]&0x80 != 0 {
+		buffer[bufPos] = 0
+		bufPos++
+	}
+
+	// Copy remaining bytes
+	for i := start; i < 4; i++ {
+		buffer[bufPos] = bytes[i]
 		bufPos++
 	}
 

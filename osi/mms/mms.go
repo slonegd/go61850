@@ -1,186 +1,230 @@
 package mms
 
-// calculateLengthBER вычисляет длину для BER-кодирования.
-// Для упрощения в этом PoC поддерживает только короткий формат длины (до 127 байт).
-func calculateLengthBER(length int) []byte {
-	if length < 0x80 {
-		return []byte{byte(length)}
-	}
-	// Для длин >= 128 используем длинный формат
-	if length <= 0xFF {
-		return []byte{0x81, byte(length)}
-	}
-	if length <= 0xFFFF {
-		return []byte{0x82, byte(length >> 8), byte(length & 0xFF)}
-	}
-	// Для очень больших длин (в PoC не используется)
-	return []byte{0x83, byte(length >> 16), byte((length >> 8) & 0xFF), byte(length & 0xFF)}
+import (
+	"github.com/slonegd/go61850/ber"
+)
+
+// InitiateRequestParams содержит параметры для создания MMS Initiate Request PDU
+type InitiateRequestParams struct {
+	// LocalDetailCalling - максимальный размер PDU (в байтах)
+	LocalDetailCalling uint32
+	// ProposedMaxServOutstandingCalling - максимальное количество одновременных запросов от клиента
+	ProposedMaxServOutstandingCalling uint32
+	// ProposedMaxServOutstandingCalled - максимальное количество одновременных запросов к серверу
+	ProposedMaxServOutstandingCalled uint32
+	// ProposedDataStructureNestingLevel - максимальный уровень вложенности структур данных
+	ProposedDataStructureNestingLevel uint32
+	// ProposedVersionNumber - версия протокола MMS
+	ProposedVersionNumber uint32
+	// ProposedParameterCBB - поддерживаемые параметры (bit string)
+	ProposedParameterCBB []byte
+	// ServicesSupportedCalling - поддерживаемые услуги (bit string)
+	ServicesSupportedCalling []byte
 }
 
-// encodeInteger кодирует INTEGER в BER.
-// Поддерживает значения от 0 до 65535.
-func encodeInteger(value int) []byte {
-	if value < 0 || value > 65535 {
-		panic("Integer out of range (0 - 65535) in PoC")
-	}
+// InitiateRequestOption представляет функцию для изменения параметров InitiateRequest
+type InitiateRequestOption func(*InitiateRequestParams)
 
-	var valueBytes []byte
-	if value <= 0x7F {
-		valueBytes = []byte{byte(value)}
-	} else if value <= 0xFF {
-		valueBytes = []byte{byte(value >> 8), byte(value & 0xFF)}
-	} else { // value <= 0xFFFF
-		highByte := byte(value >> 8)
-		if highByte > 0x7F {
-			valueBytes = []byte{0x00, highByte, byte(value & 0xFF)}
-		} else {
-			valueBytes = []byte{highByte, byte(value & 0xFF)}
-		}
-	}
-
-	ber := []byte{0x02} // Tag INTEGER
-	ber = append(ber, byte(len(valueBytes)))
-	ber = append(ber, valueBytes...)
-	return ber
-}
-
-// encodeOidValue кодирует *значение* OBJECT IDENTIFIER в BER (без тега OBJECT IDENTIFIER и длины).
-// Это значение будет использоваться внутри контекстно-зависимых тегов.
-func encodeOidValue(oid []int) []byte {
-	// Для простоты в PoC закодируем жестко заданные *значения* OID, как в примере.
-	// OID 1.0.9506.1.1 -> 0x05 0xf1 0x00
-	// OID 1.0.9506.2.1 -> 0x03 0xee 1c 0x00 0x00 0x04 0x08 0x00 0x00 79 0xef 0x18
-	if len(oid) == 5 && oid[0] == 1 && oid[1] == 0 && oid[2] == 9506 && oid[3] == 1 && oid[4] == 1 {
-		return []byte{0x05, 0xf1, 0x00}
-	} else if len(oid) == 5 && oid[0] == 1 && oid[1] == 0 && oid[2] == 9506 && oid[3] == 2 && oid[4] == 1 {
-		return []byte{0x03, 0xee, 0x1c, 0x00, 0x00, 0x04, 0x08, 0x00, 0x00, 0x79, 0xef, 0x18}
-	} else {
-		panic("Unsupported OID in PoC")
+// DefaultInitiateRequestParams возвращает параметры по умолчанию
+// соответствующие значениям из C реализации libIEC61850
+func DefaultInitiateRequestParams() *InitiateRequestParams {
+	return &InitiateRequestParams{
+		LocalDetailCalling:                65000,
+		ProposedMaxServOutstandingCalling: 5,
+		ProposedMaxServOutstandingCalled:  5,
+		ProposedDataStructureNestingLevel: 10,
+		ProposedVersionNumber:             1,
+		// ProposedParameterCBB: 0xf1 0x00 (5 бит padding, затем значение)
+		ProposedParameterCBB: []byte{0xf1, 0x00},
+		// ServicesSupportedCalling: 11 байт из libIEC61850
+		ServicesSupportedCalling: []byte{0xee, 0x1c, 0x00, 0x00, 0x04, 0x08, 0x00, 0x00, 0x79, 0xef, 0x18},
 	}
 }
 
-// buildPresentationContextDefinition собирает Presentation Context Definition (внутри списка).
-// Это: presentation-context-identifier (80) + abstract-syntax-name (81) + transfer-syntax-name (82)
-func buildPresentationContextDefinition() []byte {
-	def := []byte{}
-
-	// presentation-context-identifier (Context-specific 0, INTEGER 1)
-	int1 := encodeInteger(1)[2:]                        // Возвращает [0x02, 0x01, 0x01]
-	def = append(def, 0x80)                             // Tag
-	def = append(def, calculateLengthBER(len(int1))[0]) // Length (берём только байт длины от внутреннего элемента)
-	def = append(def, int1...)                          // Value INTEGER (без тега 0x02 и длины)
-
-	// abstract-syntax-name (Context-specific 1, OID 1.0.9506.1.1)
-	oid1Value := encodeOidValue([]int{1, 0, 9506, 1, 1})     // Возвращает [0x05, 0xf1, 0x00]
-	def = append(def, 0x81)                                  // Tag
-	def = append(def, calculateLengthBER(len(oid1Value))[0]) // Length (берём только байт длины от внутреннего элемента)
-	def = append(def, oid1Value...)                          // Value OID (только значение)
-
-	// transfer-syntax-name (Context-specific 2, OID 1.0.9506.2.1)
-	oid2Value := encodeOidValue([]int{1, 0, 9506, 2, 1})     // Возвращает [0x03, 0xee, ...]
-	def = append(def, 0x82)                                  // Tag
-	def = append(def, calculateLengthBER(len(oid2Value))[0]) // Length (берём только байт длины от внутреннего элемента)
-	def = append(def, oid2Value...)                          // Value OID (только значение)
-
-	return def
+// WithLocalDetailCalling устанавливает максимальный размер PDU
+func WithLocalDetailCalling(size uint32) InitiateRequestOption {
+	return func(p *InitiateRequestParams) {
+		p.LocalDetailCalling = size
+	}
 }
 
-// buildPresentationContextDefinitionList собирает Presentation Context Definition List (A4).
-// Содержит одно определение контекста.
-func buildPresentationContextDefinitionList() []byte {
-	def := buildPresentationContextDefinition()
-	list := []byte{}
-	list = append(list, 0xA4)                            // Tag Presentation Context Definition List (Application 4, Constructed)
-	list = append(list, calculateLengthBER(len(def))...) // Length of the definition
-	list = append(list, def...)                          // The definition itself
-	return list
+// WithProposedMaxServOutstandingCalling устанавливает макс. одновременные запросы от клиента
+func WithProposedMaxServOutstandingCalling(count uint32) InitiateRequestOption {
+	return func(p *InitiateRequestParams) {
+		p.ProposedMaxServOutstandingCalling = count
+	}
 }
 
-// BuildInitiateRequestPDU создаёт MMS InitiateRequestPDU.
+// WithProposedMaxServOutstandingCalled устанавливает макс. одновременные запросы к клиенту
+func WithProposedMaxServOutstandingCalled(count uint32) InitiateRequestOption {
+	return func(p *InitiateRequestParams) {
+		p.ProposedMaxServOutstandingCalled = count
+	}
+}
+
+// WithProposedDataStructureNestingLevel устанавливает макс. уровень вложенности структур
+func WithProposedDataStructureNestingLevel(level uint32) InitiateRequestOption {
+	return func(p *InitiateRequestParams) {
+		p.ProposedDataStructureNestingLevel = level
+	}
+}
+
+// WithProposedVersionNumber устанавливает версию протокола MMS
+func WithProposedVersionNumber(version uint32) InitiateRequestOption {
+	return func(p *InitiateRequestParams) {
+		p.ProposedVersionNumber = version
+	}
+}
+
+// WithProposedParameterCBB устанавливает поддерживаемые параметры
+func WithProposedParameterCBB(cbb []byte) InitiateRequestOption {
+	return func(p *InitiateRequestParams) {
+		p.ProposedParameterCBB = cbb
+	}
+}
+
+// WithServicesSupportedCalling устанавливает поддерживаемые услуги
+func WithServicesSupportedCalling(services []byte) InitiateRequestOption {
+	return func(p *InitiateRequestParams) {
+		p.ServicesSupportedCalling = services
+	}
+}
+
+// BuildInitiateRequestPDU создаёт MMS InitiateRequestPDU с параметрами по умолчанию.
+// Можно передать опции для переопределения отдельных параметров.
 // Возвращает BER-кодированный пакет.
-func BuildInitiateRequestPDU() []byte {
-	// 1. Тег InitiateRequestApdu (Application 8, Constructed)
-	requestApdu := []byte{0xA8}
-
-	// 2. Подготовим внутренности InitiateRequestApdu
-	innerContent := []byte{}
-
-	// 2a. localDetailCalling (Context-specific 0, INTEGER 65000)
-	int65000 := encodeInteger(65000)[2:]                                      // Возвращает [0x02, 0x03, 0x00, 0xFD, 0xE8]
-	innerContent = append(innerContent, 0x80)                                 // Tag
-	innerContent = append(innerContent, calculateLengthBER(len(int65000))[0]) // Length
-	innerContent = append(innerContent, int65000...)                          // Value
-
-	// 2b. proposedMaxServOutstandingCalling (Context-specific 1, INTEGER 5)
-	int5_a := encodeInteger(5)[2:]                                          // Возвращает [0x02, 0x01, 0x05]
-	innerContent = append(innerContent, 0x81)                               // Tag
-	innerContent = append(innerContent, calculateLengthBER(len(int5_a))[0]) // Length
-	innerContent = append(innerContent, int5_a...)                          // Value
-
-	// 2c. proposedMaxServOutstandingCalled (Context-specific 2, INTEGER 5)
-	int5_b := encodeInteger(5)[2:]                                          // Возвращает [0x02, 0x01, 0x05]
-	innerContent = append(innerContent, 0x82)                               // Tag
-	innerContent = append(innerContent, calculateLengthBER(len(int5_b))[0]) // Length
-	innerContent = append(innerContent, int5_b...)                          // Value
-
-	// 2d. proposedDataStructureNestingLevel (Context-specific 3, INTEGER 10)
-	// Согласно комментарию в poc/main.go: 83 01 0a - это proposedDataStructureNestingLevel: 10
-	// Но в оригинальном main.go это initiate-request-detail с выбором 0a
-	// Из дампа видно, что это просто 83 01 0a, что соответствует INTEGER 10
-	int10 := encodeInteger(10)[2:]                                         // Возвращает [0x02, 0x01, 0x0A]
-	innerContent = append(innerContent, 0x83)                              // Tag
-	innerContent = append(innerContent, calculateLengthBER(len(int10))[0]) // Length
-	innerContent = append(innerContent, int10...)                          // Value
-
-	// 2e. mmsInitRequestDetail (Application 4, Constructed)
-	mmsInitDetail := buildMMSInitRequestDetail()
-	innerContent = append(innerContent, mmsInitDetail...) // Добавляем a4 16 ...
-
-	// 3. Вычисляем общую длину внутреннего содержимого
-	totalInnerLength := len(innerContent)
-
-	// 4. Добавляем длину к основному тегу InitiateRequestApdu
-	requestApdu = append(requestApdu, calculateLengthBER(totalInnerLength)...)
-
-	// 5. Добавляем внутреннее содержимое
-	requestApdu = append(requestApdu, innerContent...)
-
-	return requestApdu
+func BuildInitiateRequestPDU(opts ...InitiateRequestOption) []byte {
+	params := DefaultInitiateRequestParams()
+	for _, opt := range opts {
+		opt(params)
+	}
+	return BuildInitiateRequestPDUWithParams(params)
 }
 
-// buildMMSInitRequestDetail собирает mmsInitRequestDetail (A4).
-func buildMMSInitRequestDetail() []byte {
-	detail := []byte{}
+// BuildInitiateRequestPDUWithParams создаёт MMS InitiateRequestPDU с заданными параметрами.
+// Структура пакета (из libIEC61850):
+//
+//	A8 (tag) + length + content
+//	где content содержит:
+//	  - 80 (localDetailCalling) + length + value
+//	  - 81 (proposedMaxServOutstandingCalling) + length + value
+//	  - 82 (proposedMaxServOutstandingCalled) + length + value
+//	  - 83 (proposedDataStructureNestingLevel) + length + value
+//	  - A4 (mmsInitRequestDetail) + length + detail_content
+//
+// Возвращает BER-кодированный пакет.
+func BuildInitiateRequestPDUWithParams(params *InitiateRequestParams) []byte {
+	// Буфер для построения пакета (достаточно большой размер)
+	buffer := make([]byte, 1024)
+	bufPos := 0
 
-	// proposedVersionNumber (Context-specific 0, INTEGER 1)
-	int1 := encodeInteger(1)[2:]
-	detail = append(detail, 0x80)
-	detail = append(detail, calculateLengthBER(len(int1))[0])
-	detail = append(detail, int1...)
+	// Сначала построим внутреннее содержимое, чтобы знать его размер
+	innerContent := buildInitiateRequestContent(params)
+
+	// Теперь кодируем основной тег и длину
+	// 0xA8 = Application 8, Constructed (InitiateRequestApdu)
+	bufPos = ber.EncodeTL(0xA8, uint32(len(innerContent)), buffer, bufPos)
+	copy(buffer[bufPos:], innerContent)
+	bufPos += len(innerContent)
+
+	return buffer[:bufPos]
+}
+
+// buildInitiateRequestContent собирает содержимое InitiateRequestPDU.
+// Содержит четыре INTEGER параметра и mmsInitRequestDetail.
+// Кодирование: для каждого параметра используется контекстно-зависимый тег (0x80-0x83)
+// с компактным кодированием INTEGER значения (без ведущих нулей).
+func buildInitiateRequestContent(params *InitiateRequestParams) []byte {
+	buffer := make([]byte, 1024)
+	bufPos := 0
+
+	// localDetailCalling (Context-specific 0, INTEGER)
+	// Максимальный размер PDU, который может принять клиент
+	tempBuf := make([]byte, 256)
+	tempPos := ber.EncodeUInt32(params.LocalDetailCalling, tempBuf, 0)
+	intValue := tempBuf[0:tempPos]
+	bufPos = ber.EncodeTL(0x80, uint32(len(intValue)), buffer, bufPos)
+	copy(buffer[bufPos:], intValue)
+	bufPos += len(intValue)
+
+	// proposedMaxServOutstandingCalling (Context-specific 1, INTEGER)
+	// Максимальное количество одновременных запросов от клиента к серверу
+	tempPos = ber.EncodeUInt32(params.ProposedMaxServOutstandingCalling, tempBuf, 0)
+	intValue = tempBuf[0:tempPos]
+	bufPos = ber.EncodeTL(0x81, uint32(len(intValue)), buffer, bufPos)
+	copy(buffer[bufPos:], intValue)
+	bufPos += len(intValue)
+
+	// proposedMaxServOutstandingCalled (Context-specific 2, INTEGER)
+	// Максимальное количество одновременных запросов от сервера к клиенту
+	tempPos = ber.EncodeUInt32(params.ProposedMaxServOutstandingCalled, tempBuf, 0)
+	intValue = tempBuf[0:tempPos]
+	bufPos = ber.EncodeTL(0x82, uint32(len(intValue)), buffer, bufPos)
+	copy(buffer[bufPos:], intValue)
+	bufPos += len(intValue)
+
+	// proposedDataStructureNestingLevel (Context-specific 3, INTEGER)
+	// Максимальный уровень вложенности структур данных
+	tempPos = ber.EncodeUInt32(params.ProposedDataStructureNestingLevel, tempBuf, 0)
+	intValue = tempBuf[0:tempPos]
+	bufPos = ber.EncodeTL(0x83, uint32(len(intValue)), buffer, bufPos)
+	copy(buffer[bufPos:], intValue)
+	bufPos += len(intValue)
+
+	// mmsInitRequestDetail (Application 4, Constructed)
+	// Содержит версию протокола, поддерживаемые параметры и услуги
+	mmsDetail := buildMMSInitRequestDetail(params)
+	copy(buffer[bufPos:], mmsDetail)
+	bufPos += len(mmsDetail)
+
+	return buffer[:bufPos]
+}
+
+// buildMMSInitRequestDetail собирает mmsInitRequestDetail (A4 - Application 4, Constructed).
+// Содержит три элемента:
+// - proposedVersionNumber (Context-specific 0, INTEGER) - версия протокола MMS
+// - proposedParameterCBB (Context-specific 1, BIT STRING) - поддерживаемые параметры
+// - servicesSupportedCalling (Context-specific 2, BIT STRING) - поддерживаемые услуги
+// Значения берутся из параметров и кодируются в BER формате.
+func buildMMSInitRequestDetail(params *InitiateRequestParams) []byte {
+	buffer := make([]byte, 512)
+	bufPos := 0
+
+	// proposedVersionNumber (Context-specific 0, INTEGER)
+	// Версия протокола MMS (обычно 1)
+	tempBuf := make([]byte, 256)
+	tempPos := ber.EncodeUInt32(params.ProposedVersionNumber, tempBuf, 0)
+	intValue := tempBuf[0:tempPos]
+	bufPos = ber.EncodeTL(0x80, uint32(len(intValue)), buffer, bufPos)
+	copy(buffer[bufPos:], intValue)
+	bufPos += len(intValue)
 
 	// proposedParameterCBB (Context-specific 1, BIT STRING)
-	// Значение: 0xf100 (захардкожено)
-	// BIT STRING: 0x03 (tag) + length + unused bits + value
-	// В данном случае: 0x81 0x03 0x05 0xf1 0x00
-	// где 0x05 - unused bits (5 бит неиспользуемых), 0xf1 0x00 - значение
-	detail = append(detail, 0x81)
-	detail = append(detail, 0x03) // Length
-	detail = append(detail, 0x05) // Unused bits
-	detail = append(detail, 0xf1, 0x00)
+	// Поддерживаемые параметры (Parameter CBB - Capability Bit Box)
+	// BIT STRING кодируется как: tag + length + unused_bits + data
+	// Для параметров используется 5 бит padding (неиспользуемых бит в последнем байте)
+	bufPos = ber.EncodeTL(0x81, uint32(len(params.ProposedParameterCBB)+1), buffer, bufPos)
+	buffer[bufPos] = 0x05 // 5 бит неиспользуемых в последнем байте
+	bufPos++
+	copy(buffer[bufPos:], params.ProposedParameterCBB)
+	bufPos += len(params.ProposedParameterCBB)
 
 	// servicesSupportedCalling (Context-specific 2, BIT STRING)
-	// Значение: 0xee1c00000408000079ef18 (захардкожено)
-	// BIT STRING: 0x82 0x0c 0x03 + value
-	// где 0x03 - unused bits (3 бита неиспользуемых)
-	detail = append(detail, 0x82)
-	detail = append(detail, 0x0c) // Length (12 байт)
-	detail = append(detail, 0x03) // Unused bits
-	detail = append(detail, 0xee, 0x1c, 0x00, 0x00, 0x04, 0x08, 0x00, 0x00, 0x79, 0xef, 0x18)
+	// Поддерживаемые услуги (Services Supported)
+	// Для услуг используется 3 бита padding
+	bufPos = ber.EncodeTL(0x82, uint32(len(params.ServicesSupportedCalling)+1), buffer, bufPos)
+	buffer[bufPos] = 0x03 // 3 бита неиспользуемых в последнем байте
+	bufPos++
+	copy(buffer[bufPos:], params.ServicesSupportedCalling)
+	bufPos += len(params.ServicesSupportedCalling)
 
 	// Обёртка в Application 4 (mmsInitRequestDetail)
-	result := []byte{0xA4}
-	result = append(result, calculateLengthBER(len(detail))...)
-	result = append(result, detail...)
+	// 0xA4 = Application 4, Constructed
+	detail := buffer[:bufPos]
+	result := make([]byte, 512)
+	resultPos := ber.EncodeTL(0xA4, uint32(len(detail)), result, 0)
+	copy(result[resultPos:], detail)
+	resultPos += len(detail)
 
-	return result
+	return result[:resultPos]
 }
