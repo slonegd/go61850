@@ -386,7 +386,7 @@ func TestEncodeLength(t *testing.T) {
 func TestEncodeTL(t *testing.T) {
 	tests := []struct {
 		name    string
-		tag     byte
+		tag     Tag
 		length  uint32
 		buffer  []byte
 		bufPos  int
@@ -395,7 +395,7 @@ func TestEncodeTL(t *testing.T) {
 	}{
 		{
 			name:    "simple TL",
-			tag:     0x06,
+			tag:     Tag(0x06),
 			length:  5,
 			buffer:  make([]byte, 10),
 			bufPos:  0,
@@ -404,7 +404,7 @@ func TestEncodeTL(t *testing.T) {
 		},
 		{
 			name:    "long length",
-			tag:     0x06,
+			tag:     Tag(0x06),
 			length:  0xFF,
 			buffer:  make([]byte, 10),
 			bufPos:  0,
@@ -429,7 +429,7 @@ func TestEncodeTL(t *testing.T) {
 func TestEncodeBoolean(t *testing.T) {
 	tests := []struct {
 		name    string
-		tag     byte
+		tag     Tag
 		value   bool
 		buffer  []byte
 		bufPos  int
@@ -438,7 +438,7 @@ func TestEncodeBoolean(t *testing.T) {
 	}{
 		{
 			name:    "true",
-			tag:     0x01,
+			tag:     Tag(0x01),
 			value:   true,
 			buffer:  make([]byte, 10),
 			bufPos:  0,
@@ -447,7 +447,7 @@ func TestEncodeBoolean(t *testing.T) {
 		},
 		{
 			name:    "false",
-			tag:     0x01,
+			tag:     Tag(0x01),
 			value:   false,
 			buffer:  make([]byte, 10),
 			bufPos:  0,
@@ -472,7 +472,7 @@ func TestEncodeBoolean(t *testing.T) {
 func TestEncodeStringWithTag(t *testing.T) {
 	tests := []struct {
 		name    string
-		tag     byte
+		tag     Tag
 		str     string
 		buffer  []byte
 		bufPos  int
@@ -481,7 +481,7 @@ func TestEncodeStringWithTag(t *testing.T) {
 	}{
 		{
 			name:    "simple string",
-			tag:     0x0C,
+			tag:     Tag(0x0C),
 			str:     "Hello",
 			buffer:  make([]byte, 20),
 			bufPos:  0,
@@ -490,7 +490,7 @@ func TestEncodeStringWithTag(t *testing.T) {
 		},
 		{
 			name:    "empty string",
-			tag:     0x0C,
+			tag:     Tag(0x0C),
 			str:     "",
 			buffer:  make([]byte, 10),
 			bufPos:  0,

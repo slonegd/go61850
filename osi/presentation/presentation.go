@@ -1,6 +1,8 @@
 package presentation
 
-import "github.com/slonegd/go61850/ber"
+import (
+	"github.com/slonegd/go61850/ber"
+)
 
 // PSelector представляет селектор представления
 type PSelector struct {
@@ -42,7 +44,6 @@ var (
 	berID       = []byte{0x51, 0x01}                   // 2.1.1 (basic-encoding)
 )
 
-
 // encodeUserData кодирует user data согласно encodeUserData из C библиотеки (строки 59-97)
 func encodeUserData(presentation *Presentation, userData []byte, buf []byte, bufPos int, encode bool) int {
 	payloadLength := len(userData)
@@ -58,17 +59,17 @@ func encodeUserData(presentation *Presentation, userData []byte, buf []byte, buf
 
 	if encode {
 		// fully-encoded-data (Application 1, Constructed) = 0x61
-		bufPos = ber.EncodeTL(0x61, uint32(fullyEncodedDataLength), buf, bufPos)
-		// SEQUENCE = 0x30
-		bufPos = ber.EncodeTL(0x30, uint32(encodedDataSetLength), buf, bufPos)
+		bufPos = ber.EncodeTL(ber.Application1Constructed, uint32(fullyEncodedDataLength), buf, bufPos)
+		// SEQUENCE (Constructed) = 0x30
+		bufPos = ber.EncodeTL(ber.SequenceConstructed, uint32(encodedDataSetLength), buf, bufPos)
 
 		// presentation-selector acse (INTEGER) = 0x02
-		bufPos = ber.EncodeTL(0x02, 1, buf, bufPos)
+		bufPos = ber.EncodeTL(ber.Integer, 1, buf, bufPos)
 		buf[bufPos] = presentation.acseContextId
 		bufPos++
 
 		// presentation-data (= acse payload) (Context-specific 0, Constructed) = 0xa0
-		bufPos = ber.EncodeTL(0xa0, uint32(payloadLength), buf, bufPos)
+		bufPos = ber.EncodeTL(ber.ContextSpecific0Constructed, uint32(payloadLength), buf, bufPos)
 
 		return bufPos
 	} else {
@@ -107,79 +108,79 @@ func createConnectPdu(presentation *Presentation, userData []byte) []byte {
 	buf := make([]byte, contentLength+len(userData)+100)
 	bufPos := 0
 
-	// CP-type (Application 1, Constructed) = 0x31
-	bufPos = ber.EncodeTL(0x31, uint32(contentLength), buf, bufPos)
+	// CP-type (SET, Constructed) = 0x31
+	bufPos = ber.EncodeTL(ber.SetConstructed, uint32(contentLength), buf, bufPos)
 
 	// mode-selector (Context-specific 0, Constructed) = 0xa0
-	bufPos = ber.EncodeTL(0xa0, 3, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.ContextSpecific0Constructed, 3, buf, bufPos)
 	// mode-value: normal-mode (1) (Context-specific 0, INTEGER) = 0x80
-	bufPos = ber.EncodeTL(0x80, 1, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.ContextSpecific0Primitive, 1, buf, bufPos)
 	buf[bufPos] = 1 // 1 = normal-mode
 	bufPos++
 
 	// normal-mode-parameters (Context-specific 2, Constructed) = 0xa2
-	bufPos = ber.EncodeTL(0xa2, uint32(normalModeLength), buf, bufPos)
+	bufPos = ber.EncodeTL(ber.ContextSpecific2Constructed, uint32(normalModeLength), buf, bufPos)
 
 	// calling-presentation-selector (Context-specific 1, OCTET STRING) = 0x81
-	bufPos = ber.EncodeTL(0x81, uint32(len(presentation.callingPresentationSelector.Value)), buf, bufPos)
+	bufPos = ber.EncodeTL(ber.ContextSpecific1Primitive, uint32(len(presentation.callingPresentationSelector.Value)), buf, bufPos)
 	for i := 0; i < len(presentation.callingPresentationSelector.Value); i++ {
 		buf[bufPos] = presentation.callingPresentationSelector.Value[i]
 		bufPos++
 	}
 
 	// called-presentation-selector (Context-specific 2, OCTET STRING) = 0x82
-	bufPos = ber.EncodeTL(0x82, uint32(len(presentation.calledPresentationSelector.Value)), buf, bufPos)
+	bufPos = ber.EncodeTL(ber.ContextSpecific2Primitive, uint32(len(presentation.calledPresentationSelector.Value)), buf, bufPos)
 	for i := 0; i < len(presentation.calledPresentationSelector.Value); i++ {
 		buf[bufPos] = presentation.calledPresentationSelector.Value[i]
 		bufPos++
 	}
 
 	// presentation-context-definition-list (Context-specific 4, Constructed) = 0xa4
-	bufPos = ber.EncodeTL(0xa4, 35, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.ContextSpecific4Constructed, 35, buf, bufPos)
 
 	// ACSE context list item (SEQUENCE) = 0x30
-	bufPos = ber.EncodeTL(0x30, 15, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.SequenceConstructed, 15, buf, bufPos)
 
 	// presentation-context-identifier: 1 (INTEGER) = 0x02
-	bufPos = ber.EncodeTL(0x02, 1, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.Integer, 1, buf, bufPos)
 	buf[bufPos] = 1
 	bufPos++
 
 	// abstract-syntax-name: id-as-acse (OBJECT IDENTIFIER) = 0x06
-	bufPos = ber.EncodeTL(0x06, 4, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.ObjectIdentifier, 4, buf, bufPos)
 	for i := 0; i < 4; i++ {
 		buf[bufPos] = asnIDAsACSE[i]
 		bufPos++
 	}
 
 	// transfer-syntax-name-list (SEQUENCE) = 0x30
-	bufPos = ber.EncodeTL(0x30, 4, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.SequenceConstructed, 4, buf, bufPos)
 	// Transfer-syntax-name: basic-encoding (OBJECT IDENTIFIER) = 0x06
-	bufPos = ber.EncodeTL(0x06, 2, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.ObjectIdentifier, 2, buf, bufPos)
 	for i := 0; i < 2; i++ {
 		buf[bufPos] = berID[i]
 		bufPos++
 	}
 
 	// MMS context list item (SEQUENCE) = 0x30
-	bufPos = ber.EncodeTL(0x30, 16, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.SequenceConstructed, 16, buf, bufPos)
 
 	// presentation-context-identifier: 3 (INTEGER) = 0x02
-	bufPos = ber.EncodeTL(0x02, 1, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.Integer, 1, buf, bufPos)
 	buf[bufPos] = 3
 	bufPos++
 
 	// abstract-syntax-name: mms-abstract-syntax-version1 (OBJECT IDENTIFIER) = 0x06
-	bufPos = ber.EncodeTL(0x06, 5, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.ObjectIdentifier, 5, buf, bufPos)
 	for i := 0; i < 5; i++ {
 		buf[bufPos] = asnIDMMS[i]
 		bufPos++
 	}
 
 	// transfer-syntax-name-list (SEQUENCE) = 0x30
-	bufPos = ber.EncodeTL(0x30, 4, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.SequenceConstructed, 4, buf, bufPos)
 	// Transfer-syntax-name: basic-encoding (OBJECT IDENTIFIER) = 0x06
-	bufPos = ber.EncodeTL(0x06, 2, buf, bufPos)
+	bufPos = ber.EncodeTL(ber.ObjectIdentifier, 2, buf, bufPos)
 	for i := 0; i < 2; i++ {
 		buf[bufPos] = berID[i]
 		bufPos++

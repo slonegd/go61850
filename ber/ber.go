@@ -322,15 +322,15 @@ func EncodeLength(length uint32, buffer []byte, bufPos int) int {
 }
 
 // EncodeTL encodes a Tag and Length in BER format
-func EncodeTL(tag byte, length uint32, buffer []byte, bufPos int) int {
-	buffer[bufPos] = tag
+func EncodeTL(tag Tag, length uint32, buffer []byte, bufPos int) int {
+	buffer[bufPos] = byte(tag)
 	bufPos++
 	return EncodeLength(length, buffer, bufPos)
 }
 
 // EncodeBoolean encodes a boolean value with tag in BER format
-func EncodeBoolean(tag byte, value bool, buffer []byte, bufPos int) int {
-	buffer[bufPos] = tag
+func EncodeBoolean(tag Tag, value bool, buffer []byte, bufPos int) int {
+	buffer[bufPos] = byte(tag)
 	bufPos++
 	buffer[bufPos] = 1
 	bufPos++
@@ -344,8 +344,8 @@ func EncodeBoolean(tag byte, value bool, buffer []byte, bufPos int) int {
 }
 
 // EncodeStringWithTag encodes a string with tag in BER format
-func EncodeStringWithTag(tag byte, str string, buffer []byte, bufPos int) int {
-	buffer[bufPos] = tag
+func EncodeStringWithTag(tag Tag, str string, buffer []byte, bufPos int) int {
+	buffer[bufPos] = byte(tag)
 	bufPos++
 
 	if str != "" {
@@ -364,8 +364,8 @@ func EncodeStringWithTag(tag byte, str string, buffer []byte, bufPos int) int {
 }
 
 // EncodeOctetString encodes an octet string with tag in BER format
-func EncodeOctetString(tag byte, octetString []byte, buffer []byte, bufPos int) int {
-	buffer[bufPos] = tag
+func EncodeOctetString(tag Tag, octetString []byte, buffer []byte, bufPos int) int {
+	buffer[bufPos] = byte(tag)
 	bufPos++
 
 	octetStringSize := uint32(len(octetString))
@@ -380,8 +380,8 @@ func EncodeOctetString(tag byte, octetString []byte, buffer []byte, bufPos int) 
 }
 
 // EncodeAsn1PrimitiveValue encodes an Asn1PrimitiveValue with tag in BER format
-func EncodeAsn1PrimitiveValue(tag byte, value *Asn1PrimitiveValue, buffer []byte, bufPos int) int {
-	buffer[bufPos] = tag
+func EncodeAsn1PrimitiveValue(tag Tag, value *Asn1PrimitiveValue, buffer []byte, bufPos int) int {
+	buffer[bufPos] = byte(tag)
 	bufPos++
 
 	bufPos = EncodeLength(uint32(value.Size), buffer, bufPos)
@@ -395,8 +395,8 @@ func EncodeAsn1PrimitiveValue(tag byte, value *Asn1PrimitiveValue, buffer []byte
 }
 
 // EncodeBitString encodes a bit string with tag in BER format
-func EncodeBitString(tag byte, bitStringSize int, bitString []byte, buffer []byte, bufPos int) int {
-	buffer[bufPos] = tag
+func EncodeBitString(tag Tag, bitStringSize int, bitString []byte, buffer []byte, bufPos int) int {
+	buffer[bufPos] = byte(tag)
 	bufPos++
 
 	byteSize := bitStringSize / 8
@@ -520,7 +520,7 @@ func EncodeInt32(value int32, buffer []byte, bufPos int) int {
 }
 
 // EncodeUInt32WithTL encodes an unsigned 32-bit integer with tag and length in BER format
-func EncodeUInt32WithTL(tag byte, value uint32, buffer []byte, bufPos int) int {
+func EncodeUInt32WithTL(tag Tag, value uint32, buffer []byte, bufPos int) int {
 	valueArray := make([]byte, 4)
 	binary.BigEndian.PutUint32(valueArray, value)
 
@@ -534,7 +534,7 @@ func EncodeUInt32WithTL(tag byte, value uint32, buffer []byte, bufPos int) int {
 
 	size := CompressInteger(valueBuffer)
 
-	buffer[bufPos] = tag
+	buffer[bufPos] = byte(tag)
 	bufPos++
 	buffer[bufPos] = byte(size)
 	bufPos++
