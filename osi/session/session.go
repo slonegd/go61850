@@ -1,5 +1,12 @@
 package session
 
+import (
+	"errors"
+	"fmt"
+
+	"github.com/slonegd/go61850/logger"
+)
+
 // SSelector представляет селектор сессии
 type SSelector struct {
 	Value []byte
@@ -179,4 +186,135 @@ func buildConnectSPDUWithSession(session *Session, userData []byte) []byte {
 	buf[lengthOffset] = byte(spduLength)
 
 	return buf[:offset]
+}
+
+// SessionSPDUType представляет тип Session SPDU
+type SessionSPDUType uint8
+
+const (
+	SessionSPDUTypeConnect    SessionSPDUType = 13 // CONNECT (CN)
+	SessionSPDUTypeAccept     SessionSPDUType = 14 // ACCEPT (AC)
+	SessionSPDUTypeRefuse     SessionSPDUType = 15 // REFUSE (RF)
+	SessionSPDUTypeFinish     SessionSPDUType = 17 // FINISH (FN)
+	SessionSPDUTypeDisconnect SessionSPDUType = 25 // DISCONNECT (DN)
+	SessionSPDUTypeData       SessionSPDUType = 1  // DATA TRANSFER (DT)
+)
+
+// SessionSPDU представляет Session Protocol Data Unit (ISO 8327-1)
+type SessionSPDU struct {
+	Type   SessionSPDUType // Тип SPDU
+	Length uint8           // Длина SPDU (без полей Type и Length)
+	Data   []byte          // Данные следующего уровня (Presentation)
+}
+
+// ParseSessionSPDU парсит Session SPDU из байтового буфера
+func ParseSessionSPDU(data []byte) (*SessionSPDU, error) {
+	if len(data) < 2 {
+		return nil, errors.New("Session SPDU too short: need at least 2 bytes")
+	}
+
+	spdu := &SessionSPDU{
+		Type:   SessionSPDUType(data[0]),
+		Length: data[1],
+	}
+
+	if int(spdu.Length) < 0 {
+		return nil, fmt.Errorf("invalid Session SPDU length: %d", spdu.Length)
+	}
+
+	// Вычисляем общую длину SPDU: Type (1) + Length (1) + Length bytes
+	spduTotalLength := 2 + int(spdu.Length)
+	if len(data) < spduTotalLength {
+		return nil, fmt.Errorf("Session SPDU incomplete: need %d bytes, got %d", spduTotalLength, len(data))
+	}
+
+	// Ищем Session User Data (параметр 0xC1)
+	// Парсим параметры, чтобы найти User Data
+	offset := 2 // Начинаем после Type и Length
+	userDataStart := -1
+	userDataLength := 0
+
+	for offset < spduTotalLength {
+		if offset >= len(data) {
+			break
+		}
+
+		paramType := data[offset]
+		offset++
+
+		if offset >= len(data) {
+			break
+		}
+
+		paramLength := int(data[offset])
+		offset++
+
+		// Если это Session User Data (0xC1)
+		if paramType == 0xC1 {
+			// В Session Protocol длина параметра кодируется в коротком формате
+			// даже для значений >= 128 (в отличие от BER)
+			// Если длина <= 255, используется короткий формат (1 байт)
+			// Если длина > 255, используется длинный формат (0x82 + 2 байта)
+			if paramLength == 0x82 && offset+2 <= len(data) {
+				// Длинный формат: 0x82 означает длину в 2 байта
+				userDataLength = int(data[offset])<<8 | int(data[offset+1])
+				offset += 2
+			} else {
+				// Короткий формат: длина уже прочитана (даже если >= 128)
+				userDataLength = paramLength
+			}
+
+			userDataStart = offset
+			offset += userDataLength
+			break
+		} else {
+			// Пропускаем параметр
+			if offset+paramLength > len(data) {
+				break
+			}
+			offset += paramLength
+		}
+	}
+
+	// Если нашли User Data, извлекаем его
+	if userDataStart >= 0 && userDataStart+userDataLength <= len(data) {
+		spdu.Data = make([]byte, userDataLength)
+		copy(spdu.Data, data[userDataStart:userDataStart+userDataLength])
+	} else {
+		// Если не нашли User Data, данные пустые
+		spdu.Data = []byte{}
+	}
+
+	return spdu, nil
+}
+
+// String реализует интерфейс fmt.Stringer для SessionSPDU
+func (s *SessionSPDU) String() string {
+	typeStr := "Unknown"
+	switch s.Type {
+	case SessionSPDUTypeConnect:
+		typeStr = "CONNECT"
+	case SessionSPDUTypeAccept:
+		typeStr = "ACCEPT"
+	case SessionSPDUTypeRefuse:
+		typeStr = "REFUSE"
+	case SessionSPDUTypeFinish:
+		typeStr = "FINISH"
+	case SessionSPDUTypeDisconnect:
+		typeStr = "DISCONNECT"
+	case SessionSPDUTypeData:
+		typeStr = "DATA"
+	}
+
+	return fmt.Sprintf("SessionSPDU{Type: %s (%d), Length: %d, DataLength: %d}",
+		typeStr, uint8(s.Type), s.Length, len(s.Data))
+}
+
+// LogSessionSPDU логирует Session SPDU с использованием указанного логгера
+// Используется для логирования сессии после парсинга
+func LogSessionSPDU(spdu *SessionSPDU, l logger.Logger) {
+	if spdu == nil || l == nil {
+		return
+	}
+	l.Debug("  %s", spdu)
 }

@@ -6,16 +6,9 @@
     "errors",
     "fmt",
     "io",
-    "log"
+    "github.com/slonegd/go61850/logger"
   ],
-  "interfaces": {
-    "Logger": {
-      "methods": [
-        {"name": "Debug", "signature": "Debug(format string, v ...any)"}
-      ],
-      "description": "Interface for logging COTP packets"
-    }
-  },
+  "interfaces": {},
   "types": {
     "Connection": {
       "type": "struct",
@@ -99,6 +92,53 @@
     "ConnectionOption": {
       "type": "func(*connectionOptions)",
       "description": "Function type for Connection configuration options"
+    },
+    "TPKT": {
+      "type": "struct",
+      "description": "Represents TPKT (RFC 1006) packet",
+      "fields": [
+        {"name": "Version", "type": "uint8", "description": "Protocol version (usually 3)"},
+        {"name": "Reserved", "type": "uint8", "description": "Reserved field (usually 0)"},
+        {"name": "Length", "type": "uint16", "description": "Packet length in bytes"},
+        {"name": "Data", "type": "[]byte", "description": "Data of next level (COTP)"}
+      ],
+      "methods": [
+        {"name": "String", "signature": "String() string", "description": "Implements fmt.Stringer interface"}
+      ]
+    },
+    "COTPType": {
+      "type": "uint8",
+      "description": "Represents COTP TPDU type",
+      "constants": [
+        {"name": "COTPTypeData", "value": 240, "description": "Data TPDU (0xf0)"},
+        {"name": "COTPTypeConnectionRequest", "value": 224, "description": "Connection Request (0xe0)"},
+        {"name": "COTPTypeConnectionConfirm", "value": 208, "description": "Connection Confirm (0xd0)"},
+        {"name": "COTPTypeDisconnectRequest", "value": 128, "description": "Disconnect Request (0x80)"},
+        {"name": "COTPTypeDisconnectConfirm", "value": 192, "description": "Disconnect Confirm (0xc0)"}
+      ]
+    },
+    "COTP": {
+      "type": "struct",
+      "description": "Represents COTP (ISO 8073/X.224) packet",
+      "fields": [
+        {"name": "Length", "type": "uint8", "description": "TPDU length (without Length field)"},
+        {"name": "Type", "type": "COTPType", "description": "TPDU type"},
+        {"name": "Flags", "type": "uint8", "description": "Flags (for Data TPDU: bit 7 = Last Data Unit)"},
+        {"name": "IsLastDataUnit", "type": "bool", "description": "Last data unit flag (for Data TPDU)"},
+        {"name": "DestRef", "type": "uint16", "description": "Destination reference (2 bytes)"},
+        {"name": "SrcRef", "type": "uint16", "description": "Source reference (2 bytes)"},
+        {"name": "Class", "type": "uint8", "description": "Class (4 старших бита из reference, биты 15-12)"},
+        {"name": "ExtendedFormats", "type": "bool", "description": "Extended formats (бит 1 из reference)"},
+        {"name": "NoExplicitFlowCtrl", "type": "bool", "description": "No explicit flow control (бит 0 из reference)"},
+        {"name": "ProtocolClass", "type": "uint8", "description": "Protocol class (for ConnectionConfirm/Request)"},
+        {"name": "TpduSize", "type": "uint8", "description": "TPDU size from parameter 0xc0"},
+        {"name": "DstTSAP", "type": "[]byte", "description": "Destination TSAP from parameter 0xc2"},
+        {"name": "SrcTSAP", "type": "[]byte", "description": "Source TSAP from parameter 0xc1"},
+        {"name": "Data", "type": "[]byte", "description": "Data of next level (Session)"}
+      ],
+      "methods": [
+        {"name": "String", "signature": "String() string", "description": "Implements fmt.Stringer interface"}
+      ]
     }
   },
   "constants": {
@@ -140,6 +180,16 @@
       "name": "WithLogger",
       "signature": "WithLogger(logger Logger) ConnectionOption",
       "description": "Sets logger for debugging"
+    },
+    {
+      "name": "ParseTPKT",
+      "signature": "ParseTPKT(data []byte) (*TPKT, error)",
+      "description": "Parses TPKT packet from byte buffer"
+    },
+    {
+      "name": "ParseCOTP",
+      "signature": "ParseCOTP(data []byte) (*COTP, error)",
+      "description": "Parses COTP packet from byte buffer"
     }
   ]
 }

@@ -1,7 +1,20 @@
 {
   "package": "session",
   "description": "ISO 8327-1 OSI Session Protocol implementation for IEC 61850, based on libIEC61850 C library",
-  "imports": [],
+  "imports": [
+    "errors",
+    "fmt",
+    "github.com/slonegd/go61850/logger"
+  ],
+  "interfaces": {
+    "Logger": {
+      "methods": [
+        {"name": "Debug", "signature": "Debug(format string, v ...any)"}
+      ],
+      "description": "Interface for logging Session packets"
+    }
+  },
+  "interfaces": {},
   "types": {
     "SSelector": {
       "type": "struct",
@@ -20,6 +33,30 @@
         {"name": "protocolOptions", "type": "uint8", "private": true}
       ],
       "methods": []
+    },
+    "SessionSPDUType": {
+      "type": "uint8",
+      "description": "Represents Session SPDU type",
+      "constants": [
+        {"name": "SessionSPDUTypeConnect", "value": 13, "description": "CONNECT (CN)"},
+        {"name": "SessionSPDUTypeAccept", "value": 14, "description": "ACCEPT (AC)"},
+        {"name": "SessionSPDUTypeRefuse", "value": 15, "description": "REFUSE (RF)"},
+        {"name": "SessionSPDUTypeFinish", "value": 17, "description": "FINISH (FN)"},
+        {"name": "SessionSPDUTypeDisconnect", "value": 25, "description": "DISCONNECT (DN)"},
+        {"name": "SessionSPDUTypeData", "value": 1, "description": "DATA TRANSFER (DT)"}
+      ]
+    },
+    "SessionSPDU": {
+      "type": "struct",
+      "description": "Represents Session Protocol Data Unit (ISO 8327-1)",
+      "fields": [
+        {"name": "Type", "type": "SessionSPDUType", "description": "SPDU type"},
+        {"name": "Length", "type": "uint8", "description": "SPDU length (without Type and Length fields)"},
+        {"name": "Data", "type": "[]byte", "description": "Data of next level (Presentation)"}
+      ],
+      "methods": [
+        {"name": "String", "signature": "String() string", "description": "Implements fmt.Stringer interface"}
+      ]
     }
   },
   "functions": {
@@ -30,6 +67,14 @@
     "BuildConnectSPDU": {
       "signature": "BuildConnectSPDU(userData []byte) []byte",
       "description": "Creates CONNECT SPDU (Session Protocol Data Unit) based on IsoSession_createConnectSpdu from C library. Uses default session parameters."
+    },
+    "ParseSessionSPDU": {
+      "signature": "ParseSessionSPDU(data []byte) (*SessionSPDU, error)",
+      "description": "Parses Session SPDU from byte buffer"
+    },
+    "LogSessionSPDU": {
+      "signature": "LogSessionSPDU(spdu *SessionSPDU, logger logger.Logger)",
+      "description": "Logs Session SPDU with [session] category using the specified logger"
     },
     "encodeConnectAcceptItem": {
       "signature": "encodeConnectAcceptItem(buf []byte, offset int, options uint8) int",

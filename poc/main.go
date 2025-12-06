@@ -205,15 +205,15 @@ import (
 	"time"
 
 	"github.com/slonegd/go61850"
-	"github.com/slonegd/go61850/osi/cotp"
+	"github.com/slonegd/go61850/logger"
 )
 
 // proofOfConcept выполняет Proof of Concept: устанавливает COTP соединение,
 // отправляет MMS Initiate Request и получает ответ.
-func proofOfConcept(conn net.Conn, logger cotp.Logger) error {
+func proofOfConcept(conn net.Conn, l logger.Logger) error {
 	opts := []go61850.MmsClientOption{}
-	if logger != nil {
-		opts = append(opts, go61850.WithLogger(logger))
+	if l != nil {
+		opts = append(opts, go61850.WithLogger(l))
 	}
 	client := go61850.NewMmsClient(conn, opts...)
 
@@ -235,7 +235,9 @@ func main() {
 
 	log.Printf("Connected to %s\n", address)
 
-	err = proofOfConcept(conn, nil)
+	// Создаём логгер для вывода логов всех уровней
+	l := logger.NewLogger("cotp")
+	err = proofOfConcept(conn, l)
 	if err != nil {
 		log.Fatalf("Proof of Concept failed: %v", err)
 	}

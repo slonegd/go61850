@@ -5,13 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
-)
 
-// Logger интерфейс для логирования COTP пакетов
-type Logger interface {
-	Debug(format string, v ...any)
-}
+	"github.com/slonegd/go61850/logger"
+)
 
 const (
 	tpktRFC1006HeaderSize = 4
@@ -31,7 +27,7 @@ type connectionOptions struct {
 	readBufferSize      int
 	writeBufferSize     int
 	socketExtBufferSize int
-	logger              Logger
+	logger              logger.Logger
 }
 
 // defaultConnectionOptions возвращает опции по умолчанию
@@ -45,16 +41,9 @@ func defaultConnectionOptions() connectionOptions {
 	}
 }
 
-// defaultLogger создает логгер по умолчанию через стандартный пакет log
-func defaultLogger() Logger {
-	return &stdLogger{}
-}
-
-// stdLogger реализует Logger через стандартный пакет log
-type stdLogger struct{}
-
-func (l *stdLogger) Debug(format string, v ...any) {
-	log.Printf("[cotp] "+format, v...)
+// defaultLogger создает логгер по умолчанию с категорией cotp
+func defaultLogger() logger.Logger {
+	return logger.NewLogger("cotp")
 }
 
 // ConnectionOption представляет опцию для настройки Connection
@@ -89,9 +78,9 @@ func WithSocketExtBufferSize(size int) ConnectionOption {
 }
 
 // WithLogger устанавливает логгер
-func WithLogger(logger Logger) ConnectionOption {
+func WithLogger(l logger.Logger) ConnectionOption {
 	return func(opts *connectionOptions) {
-		opts.logger = logger
+		opts.logger = l
 	}
 }
 
@@ -137,13 +126,13 @@ type Connection struct {
 	conn            io.ReadWriteCloser // TCP соединение или TLS соединение
 	options         Options
 	isLastDataUnit  bool
-	payload         []byte // Буфер для payload данных
-	writeBuffer     []byte // Буфер для записи TPKT пакета
-	readBuffer      []byte // Буфер для чтения TPKT пакета
-	packetSize      uint16 // Размер текущего пакета
-	socketExtBuffer []byte // Буфер для данных, когда TCP сокет не принимает все данные
-	socketExtFill   int    // Количество байт в extension буфере
-	logger          Logger // Логгер для отладки
+	payload         []byte        // Буфер для payload данных
+	writeBuffer     []byte        // Буфер для записи TPKT пакета
+	readBuffer      []byte        // Буфер для чтения TPKT пакета
+	packetSize      uint16        // Размер текущего пакета
+	socketExtBuffer []byte        // Буфер для данных, когда TCP сокет не принимает все данные
+	socketExtFill   int           // Количество байт в extension буфере
+	logger          logger.Logger // Логгер для отладки
 }
 
 // NewConnection создает новое COTP соединение
@@ -596,6 +585,18 @@ func (c *Connection) ParseIncomingMessage() (Indication, error) {
 	// Логирование полного TPKT пакета перед парсингом
 	if c.logger != nil && len(c.readBuffer) > 0 {
 		c.logger.Debug("RX: % x", c.readBuffer)
+
+		// Парсим TPKT и COTP для вывода в лог
+		tpkt, err := ParseTPKT(c.readBuffer)
+		if err == nil {
+			c.logger.Debug("  %s", tpkt)
+
+			// Парсим COTP из данных TPKT
+			cotpPkt, err := ParseCOTP(tpkt.Data)
+			if err == nil {
+				c.logger.Debug("  %s", cotpPkt)
+			}
+		}
 	}
 
 	indication, err := c.parseCotpMessage()
@@ -769,4 +770,229 @@ func (c *Connection) ReadToTpktBuffer(ctx context.Context) (TpktState, error) {
 
 	// Пакет полностью прочитан
 	return TpktPacketComplete, nil
+}
+
+// TPKT представляет TPKT (RFC 1006) пакет
+type TPKT struct {
+	Version  uint8  // Версия протокола (обычно 3)
+	Reserved uint8  // Зарезервированное поле (обычно 0)
+	Length   uint16 // Длина пакета в байтах
+	Data     []byte // Данные следующего уровня (COTP)
+}
+
+// ParseTPKT парсит TPKT пакет из байтового буфера
+func ParseTPKT(data []byte) (*TPKT, error) {
+	if len(data) < 4 {
+		return nil, errors.New("TPKT packet too short: need at least 4 bytes")
+	}
+
+	tpkt := &TPKT{
+		Version:  data[0],
+		Reserved: data[1],
+		Length:   uint16(data[2])<<8 | uint16(data[3]),
+	}
+
+	if tpkt.Version != 0x03 {
+		return nil, fmt.Errorf("invalid TPKT version: expected 0x03, got 0x%02x", tpkt.Version)
+	}
+
+	if tpkt.Reserved != 0x00 {
+		return nil, fmt.Errorf("invalid TPKT reserved field: expected 0x00, got 0x%02x", tpkt.Reserved)
+	}
+
+	if int(tpkt.Length) < 4 {
+		return nil, fmt.Errorf("invalid TPKT length: %d (must be at least 4)", tpkt.Length)
+	}
+
+	if len(data) < int(tpkt.Length) {
+		return nil, fmt.Errorf("TPKT packet incomplete: need %d bytes, got %d", tpkt.Length, len(data))
+	}
+
+	// Данные следующего уровня (COTP) начинаются после заголовка TPKT
+	tpkt.Data = make([]byte, int(tpkt.Length)-4)
+	copy(tpkt.Data, data[4:tpkt.Length])
+
+	return tpkt, nil
+}
+
+// String реализует интерфейс fmt.Stringer для TPKT
+func (t *TPKT) String() string {
+	return fmt.Sprintf("TPKT{Version: %d, Reserved: %d, Length: %d, DataLength: %d}",
+		t.Version, t.Reserved, t.Length, len(t.Data))
+}
+
+// COTPType представляет тип COTP TPDU
+type COTPType uint8
+
+const (
+	COTPTypeData              COTPType = 0xf0 // Data TPDU
+	COTPTypeConnectionRequest COTPType = 0xe0 // Connection Request
+	COTPTypeConnectionConfirm COTPType = 0xd0 // Connection Confirm
+	COTPTypeDisconnectRequest COTPType = 0x80 // Disconnect Request
+	COTPTypeDisconnectConfirm COTPType = 0xc0 // Disconnect Confirm
+)
+
+// COTP представляет COTP (ISO 8073/X.224) пакет
+type COTP struct {
+	Length         uint8    // Длина TPDU (без поля Length)
+	Type           COTPType // Тип TPDU
+	Flags          uint8    // Флаги (для Data TPDU: бит 7 = Last Data Unit)
+	IsLastDataUnit bool     // Флаг последнего блока данных (для Data TPDU)
+	// Поля для ConnectionConfirm и ConnectionRequest
+	DestRef            uint16 // Destination reference (2 байта)
+	SrcRef             uint16 // Source reference (2 байта)
+	Class              uint8  // Class (4 старших бита из reference, биты 15-12)
+	ExtendedFormats    bool   // Extended formats (бит 1 из reference)
+	NoExplicitFlowCtrl bool   // No explicit flow control (бит 0 из reference)
+	ProtocolClass      uint8  // Protocol class (для ConnectionConfirm/Request)
+	TpduSize           uint8  // TPDU size (из параметра 0xc0)
+	DstTSAP            []byte // Destination TSAP (из параметра 0xc2)
+	SrcTSAP            []byte // Source TSAP (из параметра 0xc1)
+	Data               []byte // Данные следующего уровня (Session)
+}
+
+// ParseCOTP парсит COTP пакет из байтового буфера
+func ParseCOTP(data []byte) (*COTP, error) {
+	if len(data) < 2 {
+		return nil, errors.New("COTP packet too short: need at least 2 bytes")
+	}
+
+	cotp := &COTP{
+		Length: data[0],
+		Type:   COTPType(data[1]),
+	}
+
+	if int(cotp.Length) < 2 {
+		return nil, fmt.Errorf("invalid COTP length: %d (must be at least 2)", cotp.Length)
+	}
+
+	// Для Data TPDU читаем флаги
+	if cotp.Type == COTPTypeData {
+		if len(data) < 3 {
+			return nil, errors.New("COTP Data TPDU too short: need at least 3 bytes")
+		}
+		cotp.Flags = data[2]
+		cotp.IsLastDataUnit = (cotp.Flags & 0x80) != 0
+
+		// Данные следующего уровня начинаются после заголовка (3 байта: Length, Type, Flags)
+		// Для Data TPDU Length указывает только на Type + Flags (минимум 2 байта)
+		// Данные идут после заголовка до конца буфера (как в parseCotpMessage)
+		dataStart := 3
+		if dataStart < len(data) {
+			cotp.Data = make([]byte, len(data)-dataStart)
+			copy(cotp.Data, data[dataStart:])
+		}
+	} else if cotp.Type == COTPTypeConnectionConfirm || cotp.Type == COTPTypeConnectionRequest {
+		// Для ConnectionConfirm и ConnectionRequest парсим заголовок и параметры
+		if len(data) < 6 {
+			return nil, errors.New("COTP Connection TPDU too short: need at least 6 bytes")
+		}
+
+		// Destination reference (2 байта)
+		destRef := uint16(data[2])<<8 | uint16(data[3])
+		cotp.DestRef = destRef
+
+		// Source reference (2 байта)
+		srcRef := uint16(data[4])<<8 | uint16(data[5])
+		cotp.SrcRef = srcRef
+
+		// Protocol class и битовые поля (1 байт после SrcRef)
+		if len(data) >= 7 {
+			flagsByte := data[6]
+			cotp.ProtocolClass = flagsByte
+			// Извлекаем битовые поля из этого байта
+			// Class (биты 7-4)
+			cotp.Class = uint8((flagsByte >> 4) & 0x0F)
+			// Extended formats (бит 1)
+			cotp.ExtendedFormats = (flagsByte & 0x02) != 0
+			// No explicit flow control (бит 0)
+			cotp.NoExplicitFlowCtrl = (flagsByte & 0x01) != 0
+		}
+
+		// Парсим параметры (начинаются с позиции 7)
+		offset := 7
+		for offset < len(data) && offset < int(cotp.Length)+1 {
+			if offset+1 >= len(data) {
+				break
+			}
+
+			paramType := data[offset]
+			paramLength := int(data[offset+1])
+			offset += 2
+
+			if offset+paramLength > len(data) {
+				break
+			}
+
+			switch paramType {
+			case 0xc0: // TPDU size
+				if paramLength == 1 {
+					cotp.TpduSize = data[offset]
+				}
+				offset += paramLength
+
+			case 0xc1: // Source TSAP
+				if paramLength > 0 && paramLength <= 16 {
+					cotp.SrcTSAP = make([]byte, paramLength)
+					copy(cotp.SrcTSAP, data[offset:offset+paramLength])
+				}
+				offset += paramLength
+
+			case 0xc2: // Destination TSAP
+				if paramLength > 0 && paramLength <= 16 {
+					cotp.DstTSAP = make([]byte, paramLength)
+					copy(cotp.DstTSAP, data[offset:offset+paramLength])
+				}
+				offset += paramLength
+
+			default:
+				// Пропускаем неизвестные параметры
+				offset += paramLength
+			}
+		}
+
+		// Для ConnectionConfirm/Request данных следующего уровня нет
+		cotp.Data = []byte{}
+	} else {
+		// Для других типов TPDU
+		// все данные относятся к COTP (параметры соединения)
+		// Данных следующего уровня (Session) нет
+		cotp.Data = []byte{}
+	}
+
+	return cotp, nil
+}
+
+// String реализует интерфейс fmt.Stringer для COTP
+func (c *COTP) String() string {
+	typeStr := "Unknown"
+	switch c.Type {
+	case COTPTypeData:
+		typeStr = "Data"
+	case COTPTypeConnectionRequest:
+		typeStr = "ConnectionRequest"
+	case COTPTypeConnectionConfirm:
+		typeStr = "ConnectionConfirm"
+	case COTPTypeDisconnectRequest:
+		typeStr = "DisconnectRequest"
+	case COTPTypeDisconnectConfirm:
+		typeStr = "DisconnectConfirm"
+	}
+
+	if c.Type == COTPTypeData {
+		return fmt.Sprintf("COTP{Length: %d, Type: %s (0x%02x), Flags: 0x%02x, IsLastDataUnit: %v, DataLength: %d}",
+			c.Length, typeStr, uint8(c.Type), c.Flags, c.IsLastDataUnit, len(c.Data))
+	}
+
+	if c.Type == COTPTypeConnectionConfirm || c.Type == COTPTypeConnectionRequest {
+		tpduSizeStr := "N/A"
+		if c.TpduSize > 0 {
+			tpduSizeStr = fmt.Sprintf("%d", 1<<c.TpduSize)
+		}
+		return fmt.Sprintf("COTP{Length: %d, Type: %s (0x%02x), DestRef: 0x%04x, SrcRef: 0x%04x, Class: %d, ExtendedFormats: %v, NoExplicitFlowCtrl: %v, ProtocolClass: %d, TpduSize: %s, DstTSAP: %x, SrcTSAP: %x, DataLength: %d}",
+			c.Length, typeStr, uint8(c.Type), c.DestRef, c.SrcRef, c.Class, c.ExtendedFormats, c.NoExplicitFlowCtrl, c.ProtocolClass, tpduSizeStr, c.DstTSAP, c.SrcTSAP, len(c.Data))
+	}
+
+	return fmt.Sprintf("COTP{Length: %d, Type: %s (0x%02x), DataLength: %d}",
+		c.Length, typeStr, uint8(c.Type), len(c.Data))
 }

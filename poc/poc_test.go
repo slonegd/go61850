@@ -104,7 +104,7 @@ func TestProofOfConcept(t *testing.T) {
 	}
 }
 
-// mockLogger реализует cotp.Logger и записывает все TX сообщения
+// mockLogger реализует logger.Logger и записывает все TX сообщения
 type mockLogger struct {
 	txMessages []string
 	txPackets  [][]byte

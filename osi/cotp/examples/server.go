@@ -7,6 +7,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/slonegd/go61850/logger"
 	"github.com/slonegd/go61850/osi/cotp"
 )
 
@@ -15,7 +16,7 @@ type Server struct {
 	listener net.Listener
 	address  string
 	handler  func(*Connection) error
-	logger   cotp.Logger
+	logger   logger.Logger
 }
 
 // Addr возвращает адрес сервера
@@ -40,8 +41,8 @@ func NewServer(address string) *Server {
 }
 
 // SetLogger устанавливает логгер для сервера
-func (s *Server) SetLogger(logger cotp.Logger) {
-	s.logger = logger
+func (s *Server) SetLogger(l logger.Logger) {
+	s.logger = l
 }
 
 // SetHandler устанавливает обработчик входящих соединений
