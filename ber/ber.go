@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"unsafe"
+
+	"golang.org/x/exp/constraints"
 )
 
 // Errors
@@ -426,6 +428,27 @@ func EncodeBitString(tag Tag, bitStringSize int, bitString []byte, buffer []byte
 	buffer[bufPos-1] = buffer[bufPos-1] & paddingMask
 
 	return bufPos
+}
+
+// EncodeBitmaskFromOffsets creates a bitmask byte slice from a list of bit offsets
+// The bitmask is encoded in BER format with big-endian bit order within each byte.
+// bitmaskSize specifies the size of the resulting bitmask in bytes.
+// Each bit offset specifies which bit should be set (0-based index from the start of the bit string).
+// In BER format, bits are numbered from left to right (MSB first), so bit 0 is the leftmost bit.
+// T can be any integer type (int, uint, int8, uint8, etc.) or a type based on them.
+func EncodeBitmaskFromOffsets[T constraints.Integer](offsets []T, bitmaskSize int) []byte {
+	bitmask := make([]byte, bitmaskSize)
+
+	for _, offset := range offsets {
+		bitIndex := uint(offset)
+		byteIndex := bitIndex / 8
+		bitOffset := 7 - (bitIndex % 8) // BER uses big-endian bit order within each byte
+		if byteIndex < uint(bitmaskSize) {
+			bitmask[byteIndex] |= 1 << bitOffset
+		}
+	}
+
+	return bitmask
 }
 
 // RevertByteOrder reverses the byte order of the given slice

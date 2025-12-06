@@ -1,0 +1,128 @@
+{
+  "package": "mms",
+  "description": "MMS (Manufacturing Message Specification) protocol implementation for IEC 61850",
+  "types": {
+    "ServiceSupportedBit": {
+      "type": "uint",
+      "description": "Represents a bit position in ServicesSupportedCalling bitmask",
+      "constants": [
+        "Status", "GetNameList", "Identify", "Rename",
+        "Read", "Write", "GetVariableAccessAttributes",
+        "DefineNamedVariable", "DefineScatteredAccess",
+        "GetScatteredAccessAttributes", "DeleteVariableAccess",
+        "DefineNamedVariableList", "GetNamedVariableListAttributes",
+        "DeleteNamedVariableList", "DefineNamedType",
+        "GetNamedTypeAttributes", "DeleteNamedType",
+        "Input", "Output", "TakeControl", "RelinquishControl",
+        "DefineSemaphore", "DeleteSemaphore", "ReportSemaphoreStatus",
+        "ReportPoolSemaphoreStatus", "ReportSemaphoreEntryStatus",
+        "InitiateDownloadSequence", "DownloadSegment",
+        "TerminateDownloadSequence", "InitiateUploadSequence",
+        "UploadSegment", "TerminateUploadSequence",
+        "RequestDomainDownload", "RequestDomainUpload",
+        "LoadDomainContent", "StoreDomainContent", "DeleteDomain",
+        "GetDomainAttributes", "CreateProgramInvocation",
+        "DeleteProgramInvocation", "Start", "Stop", "Resume",
+        "Reset", "Kill", "GetProgramInvocationAttributes",
+        "ObtainFile", "DefineEventCondition", "DeleteEventCondition",
+        "GetEventConditionAttributes", "ReportEventConditionStatus",
+        "AlterEventConditionMonitoring", "TriggerEvent",
+        "DefineEventAction", "DeleteEventAction",
+        "GetEventActionAttributes", "ReportActionStatus",
+        "DefineEventEnrollment", "DeleteEventEnrollment",
+        "AlterEventEnrollment", "ReportEventEnrollmentStatus",
+        "GetEventEnrollmentAttributes", "AcknowledgeEventNotification",
+        "GetAlarmSummary", "GetAlarmEnrollmentSummary",
+        "ReadJournal", "WriteJournal", "InitializeJournal",
+        "ReportJournalStatus", "CreateJournal", "DeleteJournal",
+        "GetCapabilityList", "FileOpen", "FileRead",
+        "FileClose", "FileRename", "FileDelete",
+        "FileDirectory", "UnsolicitedStatus", "InformationReport",
+        "EventNotification", "AttachToEventCondition",
+        "AttachToSemaphore", "Conclude", "Cancel"
+      ]
+    },
+    "ParameterCBBBit": {
+      "type": "uint",
+      "description": "Represents a bit position in ProposedParameterCBB bitmask",
+      "constants": [
+        "Str1", "Str2", "Vnam", "Valt",
+        "Vadr", "Vsca", "Tpy", "Vlis",
+        "Real", "SpareBit9", "Cei"
+      ]
+    },
+    "InitiateRequestParams": {
+      "type": "struct",
+      "fields": {
+        "LocalDetailCalling": "uint32",
+        "ProposedMaxServOutstandingCalling": "uint32",
+        "ProposedMaxServOutstandingCalled": "uint32",
+        "ProposedDataStructureNestingLevel": "uint32",
+        "ProposedVersionNumber": "uint32",
+        "ProposedParameterCBB": "[]byte",
+        "ServicesSupportedCalling": "[]byte"
+      }
+    },
+    "InitiateRequestOption": {
+      "type": "func(*InitiateRequestParams)"
+    }
+  },
+  "constants": {
+    "ServicesSupportedCallingBitmaskSize": {
+      "value": 11,
+      "type": "int",
+      "description": "Size of ServicesSupportedCalling bitmask in bytes. In MMS uses fixed size 11 bytes (85 bits data + 3 bits padding)"
+    },
+    "ProposedParameterCBBBitmaskSize": {
+      "value": 2,
+      "type": "int",
+      "description": "Size of ProposedParameterCBB bitmask in bytes. In MMS uses fixed size 2 bytes (11 bits data + 5 bits padding)"
+    }
+  },
+  "functions": {
+    "DefaultInitiateRequestParams": {
+      "returns": "*InitiateRequestParams",
+      "description": "Returns default parameters matching libIEC61850 C implementation"
+    },
+    "WithLocalDetailCalling": {
+      "params": ["size uint32"],
+      "returns": "InitiateRequestOption"
+    },
+    "WithProposedMaxServOutstandingCalling": {
+      "params": ["count uint32"],
+      "returns": "InitiateRequestOption"
+    },
+    "WithProposedMaxServOutstandingCalled": {
+      "params": ["count uint32"],
+      "returns": "InitiateRequestOption"
+    },
+    "WithProposedDataStructureNestingLevel": {
+      "params": ["level uint32"],
+      "returns": "InitiateRequestOption"
+    },
+    "WithProposedVersionNumber": {
+      "params": ["version uint32"],
+      "returns": "InitiateRequestOption"
+    },
+    "WithProposedParameterCBB": {
+      "params": ["parameters []ParameterCBBBit"],
+      "returns": "InitiateRequestOption",
+      "description": "Sets supported parameters from enum slice, converts to bitmask"
+    },
+    "WithServicesSupportedCalling": {
+      "params": ["services []ServiceSupportedBit"],
+      "returns": "InitiateRequestOption",
+      "description": "Sets supported services from enum slice, converts to bitmask"
+    },
+    "BuildInitiateRequestPDU": {
+      "params": ["opts ...InitiateRequestOption"],
+      "returns": "[]byte",
+      "description": "Creates MMS InitiateRequestPDU with default or custom options"
+    },
+    "BuildInitiateRequestPDUWithParams": {
+      "params": ["params *InitiateRequestParams"],
+      "returns": "[]byte",
+      "description": "Creates MMS InitiateRequestPDU with given parameters"
+    }
+  }
+}

@@ -7,7 +7,8 @@
     "fmt",
     "strconv",
     "strings",
-    "unsafe"
+    "unsafe",
+    "golang.org/x/exp/constraints"
   ],
   "errors": {
     "ErrBufferOverflow": {
@@ -158,6 +159,10 @@
     "EncodeOIDToBuffer": {
       "signature": "EncodeOIDToBuffer(oidString string, buffer []byte, maxBufLen int) (int, error)",
       "description": "Encodes an OID string to a buffer. Returns the number of bytes encoded or an error"
+    },
+    "EncodeBitmaskFromOffsets": {
+      "signature": "EncodeBitmaskFromOffsets[T constraints.Integer](offsets []T, bitmaskSize int) []byte",
+      "description": "Generic function that creates a bitmask byte slice from a list of bit offsets. T must satisfy constraints.Integer (any integer type from golang.org/x/exp/constraints). The bitmask is encoded in BER format with big-endian bit order within each byte. bitmaskSize specifies the size of the resulting bitmask in bytes"
     }
   },
   "constants": {

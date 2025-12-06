@@ -4,6 +4,124 @@ import (
 	"github.com/slonegd/go61850/ber"
 )
 
+// ServiceSupportedBit представляет номер бита в битовой маске ServicesSupportedCalling
+type ServiceSupportedBit uint
+
+const (
+	Status ServiceSupportedBit = iota
+	GetNameList
+	Identify
+	Rename
+	Read
+	Write
+	GetVariableAccessAttributes
+	DefineNamedVariable
+	DefineScatteredAccess
+	GetScatteredAccessAttributes
+	DeleteVariableAccess
+	DefineNamedVariableList
+	GetNamedVariableListAttributes
+	DeleteNamedVariableList
+	DefineNamedType
+	GetNamedTypeAttributes
+	DeleteNamedType
+	Input
+	Output
+	TakeControl
+	RelinquishControl
+	DefineSemaphore
+	DeleteSemaphore
+	ReportSemaphoreStatus
+	ReportPoolSemaphoreStatus
+	ReportSemaphoreEntryStatus
+	InitiateDownloadSequence
+	DownloadSegment
+	TerminateDownloadSequence
+	InitiateUploadSequence
+	UploadSegment
+	TerminateUploadSequence
+	RequestDomainDownload
+	RequestDomainUpload
+	LoadDomainContent
+	StoreDomainContent
+	DeleteDomain
+	GetDomainAttributes
+	CreateProgramInvocation
+	DeleteProgramInvocation
+	Start
+	Stop
+	Resume
+	Reset
+	Kill
+	GetProgramInvocationAttributes
+	ObtainFile
+	DefineEventCondition
+	DeleteEventCondition
+	GetEventConditionAttributes
+	ReportEventConditionStatus
+	AlterEventConditionMonitoring
+	TriggerEvent
+	DefineEventAction
+	DeleteEventAction
+	GetEventActionAttributes
+	ReportActionStatus
+	DefineEventEnrollment
+	DeleteEventEnrollment
+	AlterEventEnrollment
+	ReportEventEnrollmentStatus
+	GetEventEnrollmentAttributes
+	AcknowledgeEventNotification
+	GetAlarmSummary
+	GetAlarmEnrollmentSummary
+	ReadJournal
+	WriteJournal
+	InitializeJournal
+	ReportJournalStatus
+	CreateJournal
+	DeleteJournal
+	GetCapabilityList
+	FileOpen
+	FileRead
+	FileClose
+	FileRename
+	FileDelete
+	FileDirectory
+	UnsolicitedStatus
+	InformationReport
+	EventNotification
+	AttachToEventCondition
+	AttachToSemaphore
+	Conclude
+	Cancel
+)
+
+// ParameterCBBBit представляет номер бита в битовой маске ProposedParameterCBB
+type ParameterCBBBit uint
+
+const (
+	Str1 ParameterCBBBit = iota
+	Str2
+	Vnam
+	Valt
+	Vadr
+	Vsca
+	Tpy
+	Vlis
+	Real
+	SpareBit9
+	Cei
+)
+
+const (
+	// ServicesSupportedCallingBitmaskSize - размер битовой маски ServicesSupportedCalling в байтах
+	// В MMS используется фиксированный размер 11 байт (85 бит данных + 3 бита padding)
+	ServicesSupportedCallingBitmaskSize = 11
+
+	// ProposedParameterCBBBitmaskSize - размер битовой маски ProposedParameterCBB в байтах
+	// В MMS используется фиксированный размер 2 байта (11 бит данных + 5 бит padding)
+	ProposedParameterCBBBitmaskSize = 2
+)
+
 // InitiateRequestParams содержит параметры для создания MMS Initiate Request PDU
 type InitiateRequestParams struct {
 	// LocalDetailCalling - максимальный размер PDU (в байтах)
@@ -19,6 +137,7 @@ type InitiateRequestParams struct {
 	// ProposedParameterCBB - поддерживаемые параметры (bit string)
 	ProposedParameterCBB []byte
 	// ServicesSupportedCalling - поддерживаемые услуги (bit string)
+	// Внутренне хранится как []byte для BER-кодирования
 	ServicesSupportedCalling []byte
 }
 
@@ -34,10 +153,44 @@ func DefaultInitiateRequestParams() *InitiateRequestParams {
 		ProposedMaxServOutstandingCalled:  5,
 		ProposedDataStructureNestingLevel: 10,
 		ProposedVersionNumber:             1,
-		// ProposedParameterCBB: 0xf1 0x00 (5 бит padding, затем значение)
-		ProposedParameterCBB: []byte{0xf1, 0x00},
-		// ServicesSupportedCalling: 11 байт из libIEC61850
-		ServicesSupportedCalling: []byte{0xee, 0x1c, 0x00, 0x00, 0x04, 0x08, 0x00, 0x00, 0x79, 0xef, 0x18},
+		// ProposedParameterCBB: значения по умолчанию из libIEC61850
+		// Соответствует битовой маске: f100 (str1, str2, vnam, valt, vlis)
+		ProposedParameterCBB: ber.EncodeBitmaskFromOffsets([]ParameterCBBBit{
+			Str1,
+			Str2,
+			Vnam,
+			Valt,
+			Vlis,
+		}, ProposedParameterCBBBitmaskSize),
+		// ServicesSupportedCalling: значения по умолчанию из libIEC61850
+		// Соответствует битовой маске: ee1c00000408000079ef18
+		ServicesSupportedCalling: ber.EncodeBitmaskFromOffsets([]ServiceSupportedBit{
+			Status,
+			GetNameList,
+			Identify,
+			Read,
+			Write,
+			GetVariableAccessAttributes,
+			DefineNamedVariableList,
+			GetNamedVariableListAttributes,
+			DeleteNamedVariableList,
+			GetDomainAttributes,
+			Kill,
+			ReadJournal,
+			WriteJournal,
+			InitializeJournal,
+			ReportJournalStatus,
+			GetCapabilityList,
+			FileOpen,
+			FileRead,
+			FileClose,
+			FileDelete,
+			FileDirectory,
+			UnsolicitedStatus,
+			InformationReport,
+			Conclude,
+			Cancel,
+		}, ServicesSupportedCallingBitmaskSize),
 	}
 }
 
@@ -77,16 +230,16 @@ func WithProposedVersionNumber(version uint32) InitiateRequestOption {
 }
 
 // WithProposedParameterCBB устанавливает поддерживаемые параметры
-func WithProposedParameterCBB(cbb []byte) InitiateRequestOption {
+func WithProposedParameterCBB(parameters []ParameterCBBBit) InitiateRequestOption {
 	return func(p *InitiateRequestParams) {
-		p.ProposedParameterCBB = cbb
+		p.ProposedParameterCBB = ber.EncodeBitmaskFromOffsets(parameters, ProposedParameterCBBBitmaskSize)
 	}
 }
 
 // WithServicesSupportedCalling устанавливает поддерживаемые услуги
-func WithServicesSupportedCalling(services []byte) InitiateRequestOption {
+func WithServicesSupportedCalling(services []ServiceSupportedBit) InitiateRequestOption {
 	return func(p *InitiateRequestParams) {
-		p.ServicesSupportedCalling = services
+		p.ServicesSupportedCalling = ber.EncodeBitmaskFromOffsets(services, ServicesSupportedCallingBitmaskSize)
 	}
 }
 
