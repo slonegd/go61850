@@ -53,6 +53,12 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 		sessionLogger = logger.NewLogger("session")
 	}
 
+	// Создаём логгер для presentation с категорией [presentation]
+	var presentationLogger logger.Logger
+	if c.logger != nil {
+		presentationLogger = logger.NewLogger("presentation")
+	}
+
 	// --- Шаг 1: Отправка COTP CR TPDU ---
 	params := &cotp.IsoConnectionParameters{
 		RemoteTSelector: cotp.TSelector{Value: []byte{0, 1}},
@@ -248,6 +254,15 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 					if err == nil && sessionPdu != nil {
 						// Логируем результат парсинга
 						session.LogSessionSPDU(sessionPdu, sessionLogger)
+
+						// Парсим и логируем Presentation PDU из данных Session
+						if len(sessionPdu.Data) > 0 {
+							presentationPdu, err := presentation.ParsePresentationPDU(sessionPdu.Data)
+							if err == nil && presentationPdu != nil {
+								// Логируем результат парсинга
+								presentation.LogPresentationPDU(presentationPdu, presentationLogger)
+							}
+						}
 					}
 				}
 				c.cotpConn.ResetPayload()

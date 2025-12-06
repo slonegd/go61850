@@ -33,3 +33,5 @@ go.work.sum
 .cursor/
 
 osi/mms/c
+osi/session/c
+osi/presentation/c

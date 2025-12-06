@@ -6,14 +6,6 @@
     "fmt",
     "github.com/slonegd/go61850/logger"
   ],
-  "interfaces": {
-    "Logger": {
-      "methods": [
-        {"name": "Debug", "signature": "Debug(format string, v ...any)"}
-      ],
-      "description": "Interface for logging Session packets"
-    }
-  },
   "interfaces": {},
   "types": {
     "SSelector": {
@@ -52,6 +44,11 @@
       "fields": [
         {"name": "Type", "type": "SessionSPDUType", "description": "SPDU type"},
         {"name": "Length", "type": "uint8", "description": "SPDU length (without Type and Length fields)"},
+        {"name": "ProtocolOptions", "type": "uint8", "description": "Protocol Options from Connect Accept Item"},
+        {"name": "ProtocolVersion", "type": "uint8", "description": "Version Number from Connect Accept Item"},
+        {"name": "SessionRequirement", "type": "uint16", "description": "Session Requirement flags"},
+        {"name": "CalledSessionSelector", "type": "[]byte", "description": "Called Session Selector"},
+        {"name": "CallingSessionSelector", "type": "[]byte", "description": "Calling Session Selector (may be absent in ACCEPT)"},
         {"name": "Data", "type": "[]byte", "description": "Data of next level (Presentation)"}
       ],
       "methods": [
@@ -70,7 +67,7 @@
     },
     "ParseSessionSPDU": {
       "signature": "ParseSessionSPDU(data []byte) (*SessionSPDU, error)",
-      "description": "Parses Session SPDU from byte buffer"
+      "description": "Parses Session SPDU from byte buffer, extracting all parameters including ProtocolOptions, ProtocolVersion, SessionRequirement, selectors, and user data"
     },
     "LogSessionSPDU": {
       "signature": "LogSessionSPDU(spdu *SessionSPDU, logger logger.Logger)",

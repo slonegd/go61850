@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/slonegd/go61850/logger"
 )
@@ -202,9 +203,14 @@ const (
 
 // SessionSPDU представляет Session Protocol Data Unit (ISO 8327-1)
 type SessionSPDU struct {
-	Type   SessionSPDUType // Тип SPDU
-	Length uint8           // Длина SPDU (без полей Type и Length)
-	Data   []byte          // Данные следующего уровня (Presentation)
+	Type                   SessionSPDUType // Тип SPDU
+	Length                 uint8           // Длина SPDU (без полей Type и Length)
+	ProtocolOptions        uint8           // Protocol Options (из Connect Accept Item)
+	ProtocolVersion        uint8           // Version Number (из Connect Accept Item)
+	SessionRequirement     uint16          // Session Requirement
+	CalledSessionSelector  []byte          // Called Session Selector
+	CallingSessionSelector []byte          // Calling Session Selector (может отсутствовать в ACCEPT)
+	Data                   []byte          // Данные следующего уровня (Presentation)
 }
 
 // ParseSessionSPDU парсит Session SPDU из байтового буфера
@@ -228,12 +234,12 @@ func ParseSessionSPDU(data []byte) (*SessionSPDU, error) {
 		return nil, fmt.Errorf("Session SPDU incomplete: need %d bytes, got %d", spduTotalLength, len(data))
 	}
 
-	// Ищем Session User Data (параметр 0xC1)
-	// Парсим параметры, чтобы найти User Data
+	// Парсим параметры
 	offset := 2 // Начинаем после Type и Length
 	userDataStart := -1
 	userDataLength := 0
 
+parseLoop:
 	for offset < spduTotalLength {
 		if offset >= len(data) {
 			break
@@ -249,8 +255,69 @@ func ParseSessionSPDU(data []byte) (*SessionSPDU, error) {
 		paramLength := int(data[offset])
 		offset++
 
-		// Если это Session User Data (0xC1)
-		if paramType == 0xC1 {
+		switch paramType {
+		case 5: // Connect Accept Item
+			// Парсим Connect Accept Item, который содержит вложенные параметры
+			connectAcceptStart := offset
+			connectAcceptEnd := offset + paramLength
+			for connectAcceptStart < connectAcceptEnd && connectAcceptStart < len(data) {
+				pi := data[connectAcceptStart]
+				connectAcceptStart++
+				if connectAcceptStart >= len(data) {
+					break
+				}
+				piLength := int(data[connectAcceptStart])
+				connectAcceptStart++
+
+				switch pi {
+				case 19: // Protocol Options
+					if piLength == 1 && connectAcceptStart < len(data) {
+						spdu.ProtocolOptions = data[connectAcceptStart]
+						connectAcceptStart++
+					}
+				case 22: // Version Number
+					if piLength == 1 && connectAcceptStart < len(data) {
+						spdu.ProtocolVersion = data[connectAcceptStart]
+						connectAcceptStart++
+					}
+				default:
+					// Пропускаем неизвестные параметры
+					if connectAcceptStart+piLength <= len(data) {
+						connectAcceptStart += piLength
+					} else {
+						connectAcceptStart = connectAcceptEnd
+					}
+				}
+			}
+			offset += paramLength
+
+		case 20: // Session Requirement
+			if paramLength == 2 && offset+1 < len(data) {
+				spdu.SessionRequirement = uint16(data[offset])<<8 | uint16(data[offset+1])
+				offset += paramLength
+			} else {
+				offset += paramLength
+			}
+
+		case 51: // Calling Session Selector
+			if paramLength > 0 && paramLength <= 16 && offset+paramLength <= len(data) {
+				spdu.CallingSessionSelector = make([]byte, paramLength)
+				copy(spdu.CallingSessionSelector, data[offset:offset+paramLength])
+				offset += paramLength
+			} else {
+				offset += paramLength
+			}
+
+		case 52: // Called Session Selector
+			if paramLength > 0 && paramLength <= 16 && offset+paramLength <= len(data) {
+				spdu.CalledSessionSelector = make([]byte, paramLength)
+				copy(spdu.CalledSessionSelector, data[offset:offset+paramLength])
+				offset += paramLength
+			} else {
+				offset += paramLength
+			}
+
+		case 0xC1: // Session User Data
 			// В Session Protocol длина параметра кодируется в коротком формате
 			// даже для значений >= 128 (в отличие от BER)
 			// Если длина <= 255, используется короткий формат (1 байт)
@@ -266,10 +333,13 @@ func ParseSessionSPDU(data []byte) (*SessionSPDU, error) {
 
 			userDataStart = offset
 			offset += userDataLength
-			break
-		} else {
-			// Пропускаем параметр
+			// После User Data обычно заканчивается SPDU
+			break parseLoop
+
+		default:
+			// Пропускаем неизвестные параметры
 			if offset+paramLength > len(data) {
+				offset = spduTotalLength
 				break
 			}
 			offset += paramLength
@@ -290,6 +360,8 @@ func ParseSessionSPDU(data []byte) (*SessionSPDU, error) {
 
 // String реализует интерфейс fmt.Stringer для SessionSPDU
 func (s *SessionSPDU) String() string {
+	var builder strings.Builder
+
 	typeStr := "Unknown"
 	switch s.Type {
 	case SessionSPDUTypeConnect:
@@ -306,8 +378,48 @@ func (s *SessionSPDU) String() string {
 		typeStr = "DATA"
 	}
 
-	return fmt.Sprintf("SessionSPDU{Type: %s (%d), Length: %d, DataLength: %d}",
-		typeStr, uint8(s.Type), s.Length, len(s.Data))
+	// Форматируем селекторы в hex
+	formatSelector := func(sel []byte) string {
+		if len(sel) == 0 {
+			return "[]"
+		}
+		var selBuilder strings.Builder
+		selBuilder.WriteByte('[')
+		for i, b := range sel {
+			if i > 0 {
+				selBuilder.WriteByte(' ')
+			}
+			fmt.Fprintf(&selBuilder, "%02x", b)
+		}
+		selBuilder.WriteByte(']')
+		return selBuilder.String()
+	}
+
+	builder.WriteString("SessionSPDU{Type: ")
+	builder.WriteString(typeStr)
+	fmt.Fprintf(&builder, " (%d), Length: %d", uint8(s.Type), s.Length)
+
+	if s.ProtocolOptions != 0 || s.ProtocolVersion != 0 {
+		fmt.Fprintf(&builder, ", ProtocolOptions: 0x%02x, ProtocolVersion: %d", s.ProtocolOptions, s.ProtocolVersion)
+	}
+
+	if s.SessionRequirement != 0 {
+		fmt.Fprintf(&builder, ", SessionRequirement: 0x%04x", s.SessionRequirement)
+	}
+
+	if len(s.CallingSessionSelector) > 0 {
+		builder.WriteString(", CallingSessionSelector: ")
+		builder.WriteString(formatSelector(s.CallingSessionSelector))
+	}
+
+	if len(s.CalledSessionSelector) > 0 {
+		builder.WriteString(", CalledSessionSelector: ")
+		builder.WriteString(formatSelector(s.CalledSessionSelector))
+	}
+
+	fmt.Fprintf(&builder, ", DataLength: %d}", len(s.Data))
+
+	return builder.String()
 }
 
 // LogSessionSPDU логирует Session SPDU с использованием указанного логгера
