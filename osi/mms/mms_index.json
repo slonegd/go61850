@@ -51,20 +51,31 @@
         "Real", "SpareBit9", "Cei"
       ]
     },
-    "InitiateRequestParams": {
+    "InitiateRequest": {
       "type": "struct",
+      "description": "Contains parameters for creating MMS Initiate Request PDU",
       "fields": {
         "LocalDetailCalling": "uint32",
         "ProposedMaxServOutstandingCalling": "uint32",
         "ProposedMaxServOutstandingCalled": "uint32",
         "ProposedDataStructureNestingLevel": "uint32",
         "ProposedVersionNumber": "uint32",
-        "ProposedParameterCBB": "[]byte",
-        "ServicesSupportedCalling": "[]byte"
+        "ProposedParameterCBB": "[]ParameterCBBBit",
+        "ServicesSupportedCalling": "[]ServiceSupportedBit"
+      },
+      "methods": {
+        "String": {
+          "returns": "string",
+          "description": "Implements fmt.Stringer. Lists set bits for ProposedParameterCBB and ServicesSupportedCalling, other fields as %+v"
+        },
+        "Bytes": {
+          "returns": "[]byte",
+          "description": "Encodes InitiateRequest to BER-encoded packet"
+        }
       }
     },
     "InitiateRequestOption": {
-      "type": "func(*InitiateRequestParams)"
+      "type": "func(*InitiateRequest)"
     }
   },
   "constants": {
@@ -81,8 +92,13 @@
   },
   "functions": {
     "DefaultInitiateRequestParams": {
-      "returns": "*InitiateRequestParams",
+      "returns": "*InitiateRequest",
       "description": "Returns default parameters matching libIEC61850 C implementation"
+    },
+    "NewInitiateRequest": {
+      "params": ["opts ...InitiateRequestOption"],
+      "returns": "*InitiateRequest",
+      "description": "Creates MMS InitiateRequest with default or custom options"
     },
     "WithLocalDetailCalling": {
       "params": ["size uint32"],
@@ -107,22 +123,22 @@
     "WithProposedParameterCBB": {
       "params": ["parameters []ParameterCBBBit"],
       "returns": "InitiateRequestOption",
-      "description": "Sets supported parameters from enum slice, converts to bitmask"
+      "description": "Sets supported parameters from enum slice"
     },
     "WithServicesSupportedCalling": {
       "params": ["services []ServiceSupportedBit"],
       "returns": "InitiateRequestOption",
-      "description": "Sets supported services from enum slice, converts to bitmask"
+      "description": "Sets supported services from enum slice"
     },
     "BuildInitiateRequestPDU": {
       "params": ["opts ...InitiateRequestOption"],
       "returns": "[]byte",
-      "description": "Creates MMS InitiateRequestPDU with default or custom options"
+      "description": "Creates MMS InitiateRequestPDU with default or custom options. Deprecated: use NewInitiateRequest().Bytes() instead"
     },
     "BuildInitiateRequestPDUWithParams": {
-      "params": ["params *InitiateRequestParams"],
+      "params": ["params *InitiateRequest"],
       "returns": "[]byte",
-      "description": "Creates MMS InitiateRequestPDU with given parameters"
+      "description": "Creates MMS InitiateRequestPDU with given parameters. Deprecated: use InitiateRequest.Bytes() instead"
     }
   }
 }

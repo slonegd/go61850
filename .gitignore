@@ -35,3 +35,4 @@ go.work.sum
 osi/mms/c
 osi/session/c
 osi/presentation/c
+osi/asce/c

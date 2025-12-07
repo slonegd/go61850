@@ -1,6 +1,9 @@
 package mms
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/slonegd/go61850/ber"
 )
 
@@ -95,6 +98,184 @@ const (
 	Cancel
 )
 
+// String возвращает строковое представление ServiceSupportedBit
+func (b ServiceSupportedBit) String() string {
+	switch b {
+	case Status:
+		return "Status"
+	case GetNameList:
+		return "GetNameList"
+	case Identify:
+		return "Identify"
+	case Rename:
+		return "Rename"
+	case Read:
+		return "Read"
+	case Write:
+		return "Write"
+	case GetVariableAccessAttributes:
+		return "GetVariableAccessAttributes"
+	case DefineNamedVariable:
+		return "DefineNamedVariable"
+	case DefineScatteredAccess:
+		return "DefineScatteredAccess"
+	case GetScatteredAccessAttributes:
+		return "GetScatteredAccessAttributes"
+	case DeleteVariableAccess:
+		return "DeleteVariableAccess"
+	case DefineNamedVariableList:
+		return "DefineNamedVariableList"
+	case GetNamedVariableListAttributes:
+		return "GetNamedVariableListAttributes"
+	case DeleteNamedVariableList:
+		return "DeleteNamedVariableList"
+	case DefineNamedType:
+		return "DefineNamedType"
+	case GetNamedTypeAttributes:
+		return "GetNamedTypeAttributes"
+	case DeleteNamedType:
+		return "DeleteNamedType"
+	case Input:
+		return "Input"
+	case Output:
+		return "Output"
+	case TakeControl:
+		return "TakeControl"
+	case RelinquishControl:
+		return "RelinquishControl"
+	case DefineSemaphore:
+		return "DefineSemaphore"
+	case DeleteSemaphore:
+		return "DeleteSemaphore"
+	case ReportSemaphoreStatus:
+		return "ReportSemaphoreStatus"
+	case ReportPoolSemaphoreStatus:
+		return "ReportPoolSemaphoreStatus"
+	case ReportSemaphoreEntryStatus:
+		return "ReportSemaphoreEntryStatus"
+	case InitiateDownloadSequence:
+		return "InitiateDownloadSequence"
+	case DownloadSegment:
+		return "DownloadSegment"
+	case TerminateDownloadSequence:
+		return "TerminateDownloadSequence"
+	case InitiateUploadSequence:
+		return "InitiateUploadSequence"
+	case UploadSegment:
+		return "UploadSegment"
+	case TerminateUploadSequence:
+		return "TerminateUploadSequence"
+	case RequestDomainDownload:
+		return "RequestDomainDownload"
+	case RequestDomainUpload:
+		return "RequestDomainUpload"
+	case LoadDomainContent:
+		return "LoadDomainContent"
+	case StoreDomainContent:
+		return "StoreDomainContent"
+	case DeleteDomain:
+		return "DeleteDomain"
+	case GetDomainAttributes:
+		return "GetDomainAttributes"
+	case CreateProgramInvocation:
+		return "CreateProgramInvocation"
+	case DeleteProgramInvocation:
+		return "DeleteProgramInvocation"
+	case Start:
+		return "Start"
+	case Stop:
+		return "Stop"
+	case Resume:
+		return "Resume"
+	case Reset:
+		return "Reset"
+	case Kill:
+		return "Kill"
+	case GetProgramInvocationAttributes:
+		return "GetProgramInvocationAttributes"
+	case ObtainFile:
+		return "ObtainFile"
+	case DefineEventCondition:
+		return "DefineEventCondition"
+	case DeleteEventCondition:
+		return "DeleteEventCondition"
+	case GetEventConditionAttributes:
+		return "GetEventConditionAttributes"
+	case ReportEventConditionStatus:
+		return "ReportEventConditionStatus"
+	case AlterEventConditionMonitoring:
+		return "AlterEventConditionMonitoring"
+	case TriggerEvent:
+		return "TriggerEvent"
+	case DefineEventAction:
+		return "DefineEventAction"
+	case DeleteEventAction:
+		return "DeleteEventAction"
+	case GetEventActionAttributes:
+		return "GetEventActionAttributes"
+	case ReportActionStatus:
+		return "ReportActionStatus"
+	case DefineEventEnrollment:
+		return "DefineEventEnrollment"
+	case DeleteEventEnrollment:
+		return "DeleteEventEnrollment"
+	case AlterEventEnrollment:
+		return "AlterEventEnrollment"
+	case ReportEventEnrollmentStatus:
+		return "ReportEventEnrollmentStatus"
+	case GetEventEnrollmentAttributes:
+		return "GetEventEnrollmentAttributes"
+	case AcknowledgeEventNotification:
+		return "AcknowledgeEventNotification"
+	case GetAlarmSummary:
+		return "GetAlarmSummary"
+	case GetAlarmEnrollmentSummary:
+		return "GetAlarmEnrollmentSummary"
+	case ReadJournal:
+		return "ReadJournal"
+	case WriteJournal:
+		return "WriteJournal"
+	case InitializeJournal:
+		return "InitializeJournal"
+	case ReportJournalStatus:
+		return "ReportJournalStatus"
+	case CreateJournal:
+		return "CreateJournal"
+	case DeleteJournal:
+		return "DeleteJournal"
+	case GetCapabilityList:
+		return "GetCapabilityList"
+	case FileOpen:
+		return "FileOpen"
+	case FileRead:
+		return "FileRead"
+	case FileClose:
+		return "FileClose"
+	case FileRename:
+		return "FileRename"
+	case FileDelete:
+		return "FileDelete"
+	case FileDirectory:
+		return "FileDirectory"
+	case UnsolicitedStatus:
+		return "UnsolicitedStatus"
+	case InformationReport:
+		return "InformationReport"
+	case EventNotification:
+		return "EventNotification"
+	case AttachToEventCondition:
+		return "AttachToEventCondition"
+	case AttachToSemaphore:
+		return "AttachToSemaphore"
+	case Conclude:
+		return "Conclude"
+	case Cancel:
+		return "Cancel"
+	default:
+		return fmt.Sprintf("ServiceSupportedBit(%d)", b)
+	}
+}
+
 // ParameterCBBBit представляет номер бита в битовой маске ProposedParameterCBB
 type ParameterCBBBit uint
 
@@ -112,6 +293,36 @@ const (
 	Cei
 )
 
+// String возвращает строковое представление ParameterCBBBit
+func (b ParameterCBBBit) String() string {
+	switch b {
+	case Str1:
+		return "Str1"
+	case Str2:
+		return "Str2"
+	case Vnam:
+		return "Vnam"
+	case Valt:
+		return "Valt"
+	case Vadr:
+		return "Vadr"
+	case Vsca:
+		return "Vsca"
+	case Tpy:
+		return "Tpy"
+	case Vlis:
+		return "Vlis"
+	case Real:
+		return "Real"
+	case SpareBit9:
+		return "SpareBit9"
+	case Cei:
+		return "Cei"
+	default:
+		return fmt.Sprintf("ParameterCBBBit(%d)", b)
+	}
+}
+
 const (
 	// ServicesSupportedCallingBitmaskSize - размер битовой маски ServicesSupportedCalling в байтах
 	// В MMS используется фиксированный размер 11 байт (85 бит данных + 3 бита padding)
@@ -122,8 +333,8 @@ const (
 	ProposedParameterCBBBitmaskSize = 2
 )
 
-// InitiateRequestParams содержит параметры для создания MMS Initiate Request PDU
-type InitiateRequestParams struct {
+// InitiateRequest содержит параметры для создания MMS Initiate Request PDU
+type InitiateRequest struct {
 	// LocalDetailCalling - максимальный размер PDU (в байтах)
 	LocalDetailCalling uint32
 	// ProposedMaxServOutstandingCalling - максимальное количество одновременных запросов от клиента
@@ -134,20 +345,19 @@ type InitiateRequestParams struct {
 	ProposedDataStructureNestingLevel uint32
 	// ProposedVersionNumber - версия протокола MMS
 	ProposedVersionNumber uint32
-	// ProposedParameterCBB - поддерживаемые параметры (bit string)
-	ProposedParameterCBB []byte
-	// ServicesSupportedCalling - поддерживаемые услуги (bit string)
-	// Внутренне хранится как []byte для BER-кодирования
-	ServicesSupportedCalling []byte
+	// ProposedParameterCBB - поддерживаемые параметры (слайс битов)
+	ProposedParameterCBB []ParameterCBBBit
+	// ServicesSupportedCalling - поддерживаемые услуги (слайс битов)
+	ServicesSupportedCalling []ServiceSupportedBit
 }
 
 // InitiateRequestOption представляет функцию для изменения параметров InitiateRequest
-type InitiateRequestOption func(*InitiateRequestParams)
+type InitiateRequestOption func(*InitiateRequest)
 
 // DefaultInitiateRequestParams возвращает параметры по умолчанию
 // соответствующие значениям из C реализации libIEC61850
-func DefaultInitiateRequestParams() *InitiateRequestParams {
-	return &InitiateRequestParams{
+func DefaultInitiateRequestParams() *InitiateRequest {
+	return &InitiateRequest{
 		LocalDetailCalling:                65000,
 		ProposedMaxServOutstandingCalling: 5,
 		ProposedMaxServOutstandingCalled:  5,
@@ -155,16 +365,16 @@ func DefaultInitiateRequestParams() *InitiateRequestParams {
 		ProposedVersionNumber:             1,
 		// ProposedParameterCBB: значения по умолчанию из libIEC61850
 		// Соответствует битовой маске: f100 (str1, str2, vnam, valt, vlis)
-		ProposedParameterCBB: ber.EncodeBitmaskFromOffsets([]ParameterCBBBit{
+		ProposedParameterCBB: []ParameterCBBBit{
 			Str1,
 			Str2,
 			Vnam,
 			Valt,
 			Vlis,
-		}, ProposedParameterCBBBitmaskSize),
+		},
 		// ServicesSupportedCalling: значения по умолчанию из libIEC61850
 		// Соответствует битовой маске: ee1c00000408000079ef18
-		ServicesSupportedCalling: ber.EncodeBitmaskFromOffsets([]ServiceSupportedBit{
+		ServicesSupportedCalling: []ServiceSupportedBit{
 			Status,
 			GetNameList,
 			Identify,
@@ -190,71 +400,97 @@ func DefaultInitiateRequestParams() *InitiateRequestParams {
 			InformationReport,
 			Conclude,
 			Cancel,
-		}, ServicesSupportedCallingBitmaskSize),
+		},
 	}
 }
 
 // WithLocalDetailCalling устанавливает максимальный размер PDU
 func WithLocalDetailCalling(size uint32) InitiateRequestOption {
-	return func(p *InitiateRequestParams) {
+	return func(p *InitiateRequest) {
 		p.LocalDetailCalling = size
 	}
 }
 
 // WithProposedMaxServOutstandingCalling устанавливает макс. одновременные запросы от клиента
 func WithProposedMaxServOutstandingCalling(count uint32) InitiateRequestOption {
-	return func(p *InitiateRequestParams) {
+	return func(p *InitiateRequest) {
 		p.ProposedMaxServOutstandingCalling = count
 	}
 }
 
 // WithProposedMaxServOutstandingCalled устанавливает макс. одновременные запросы к клиенту
 func WithProposedMaxServOutstandingCalled(count uint32) InitiateRequestOption {
-	return func(p *InitiateRequestParams) {
+	return func(p *InitiateRequest) {
 		p.ProposedMaxServOutstandingCalled = count
 	}
 }
 
 // WithProposedDataStructureNestingLevel устанавливает макс. уровень вложенности структур
 func WithProposedDataStructureNestingLevel(level uint32) InitiateRequestOption {
-	return func(p *InitiateRequestParams) {
+	return func(p *InitiateRequest) {
 		p.ProposedDataStructureNestingLevel = level
 	}
 }
 
 // WithProposedVersionNumber устанавливает версию протокола MMS
 func WithProposedVersionNumber(version uint32) InitiateRequestOption {
-	return func(p *InitiateRequestParams) {
+	return func(p *InitiateRequest) {
 		p.ProposedVersionNumber = version
 	}
 }
 
 // WithProposedParameterCBB устанавливает поддерживаемые параметры
 func WithProposedParameterCBB(parameters []ParameterCBBBit) InitiateRequestOption {
-	return func(p *InitiateRequestParams) {
-		p.ProposedParameterCBB = ber.EncodeBitmaskFromOffsets(parameters, ProposedParameterCBBBitmaskSize)
+	return func(p *InitiateRequest) {
+		p.ProposedParameterCBB = parameters
 	}
 }
 
 // WithServicesSupportedCalling устанавливает поддерживаемые услуги
 func WithServicesSupportedCalling(services []ServiceSupportedBit) InitiateRequestOption {
-	return func(p *InitiateRequestParams) {
-		p.ServicesSupportedCalling = ber.EncodeBitmaskFromOffsets(services, ServicesSupportedCallingBitmaskSize)
+	return func(p *InitiateRequest) {
+		p.ServicesSupportedCalling = services
 	}
 }
 
-// BuildInitiateRequestPDU создаёт MMS InitiateRequestPDU с параметрами по умолчанию.
-// Можно передать опции для переопределения отдельных параметров.
-// Возвращает BER-кодированный пакет.
-func BuildInitiateRequestPDU(opts ...InitiateRequestOption) []byte {
-	params := DefaultInitiateRequestParams()
-	for _, opt := range opts {
-		opt(params)
+// String реализует интерфейс fmt.Stringer для InitiateRequest.
+// Для ProposedParameterCBB и ServicesSupportedCalling выводит список установленных битов,
+// остальные поля выводятся как при %+v.
+func (r *InitiateRequest) String() string {
+	var parts []string
+
+	parts = append(parts, fmt.Sprintf("LocalDetailCalling:%d", r.LocalDetailCalling))
+	parts = append(parts, fmt.Sprintf("ProposedMaxServOutstandingCalling:%d", r.ProposedMaxServOutstandingCalling))
+	parts = append(parts, fmt.Sprintf("ProposedMaxServOutstandingCalled:%d", r.ProposedMaxServOutstandingCalled))
+	parts = append(parts, fmt.Sprintf("ProposedDataStructureNestingLevel:%d", r.ProposedDataStructureNestingLevel))
+	parts = append(parts, fmt.Sprintf("ProposedVersionNumber:%d", r.ProposedVersionNumber))
+
+	// ProposedParameterCBB - список установленных битов
+	if len(r.ProposedParameterCBB) > 0 {
+		bitNames := make([]string, len(r.ProposedParameterCBB))
+		for i, bit := range r.ProposedParameterCBB {
+			bitNames[i] = bit.String()
+		}
+		parts = append(parts, fmt.Sprintf("ProposedParameterCBB:[%s]", strings.Join(bitNames, " ")))
+	} else {
+		parts = append(parts, "ProposedParameterCBB:[]")
 	}
-	return BuildInitiateRequestPDUWithParams(params)
+
+	// ServicesSupportedCalling - список установленных битов
+	if len(r.ServicesSupportedCalling) > 0 {
+		bitNames := make([]string, len(r.ServicesSupportedCalling))
+		for i, bit := range r.ServicesSupportedCalling {
+			bitNames[i] = bit.String()
+		}
+		parts = append(parts, fmt.Sprintf("ServicesSupportedCalling:[%s]", strings.Join(bitNames, " ")))
+	} else {
+		parts = append(parts, "ServicesSupportedCalling:[]")
+	}
+
+	return fmt.Sprintf("InitiateRequest{%s}", strings.Join(parts, " "))
 }
 
-// BuildInitiateRequestPDUWithParams создаёт MMS InitiateRequestPDU с заданными параметрами.
+// Bytes кодирует InitiateRequest в BER-кодированный пакет.
 // Структура пакета (из libIEC61850):
 //
 //	A8 (tag) + length + content
@@ -264,15 +500,13 @@ func BuildInitiateRequestPDU(opts ...InitiateRequestOption) []byte {
 //	  - 82 (proposedMaxServOutstandingCalled) + length + value
 //	  - 83 (proposedDataStructureNestingLevel) + length + value
 //	  - A4 (mmsInitRequestDetail) + length + detail_content
-//
-// Возвращает BER-кодированный пакет.
-func BuildInitiateRequestPDUWithParams(params *InitiateRequestParams) []byte {
+func (r *InitiateRequest) Bytes() []byte {
 	// Буфер для построения пакета (достаточно большой размер)
 	buffer := make([]byte, 1024)
 	bufPos := 0
 
 	// Сначала построим внутреннее содержимое, чтобы знать его размер
-	innerContent := buildInitiateRequestContent(params)
+	innerContent := r.buildInitiateRequestContent()
 
 	// Теперь кодируем основной тег и длину
 	// 0xA8 = Application 8, Constructed (InitiateRequestApdu)
@@ -283,18 +517,42 @@ func BuildInitiateRequestPDUWithParams(params *InitiateRequestParams) []byte {
 	return buffer[:bufPos]
 }
 
+// NewInitiateRequest создаёт MMS InitiateRequest с параметрами по умолчанию.
+// Можно передать опции для переопределения отдельных параметров.
+func NewInitiateRequest(opts ...InitiateRequestOption) *InitiateRequest {
+	params := DefaultInitiateRequestParams()
+	for _, opt := range opts {
+		opt(params)
+	}
+	return params
+}
+
+// BuildInitiateRequestPDU создаёт MMS InitiateRequestPDU с параметрами по умолчанию.
+// Можно передать опции для переопределения отдельных параметров.
+// Возвращает BER-кодированный пакет.
+// Deprecated: используйте NewInitiateRequest().Bytes() вместо этой функции.
+func BuildInitiateRequestPDU(opts ...InitiateRequestOption) []byte {
+	return NewInitiateRequest(opts...).Bytes()
+}
+
+// BuildInitiateRequestPDUWithParams создаёт MMS InitiateRequestPDU с заданными параметрами.
+// Deprecated: используйте InitiateRequest.Bytes() вместо этой функции.
+func BuildInitiateRequestPDUWithParams(params *InitiateRequest) []byte {
+	return params.Bytes()
+}
+
 // buildInitiateRequestContent собирает содержимое InitiateRequestPDU.
 // Содержит четыре INTEGER параметра и mmsInitRequestDetail.
 // Кодирование: для каждого параметра используется контекстно-зависимый тег (0x80-0x83)
 // с компактным кодированием INTEGER значения (без ведущих нулей).
-func buildInitiateRequestContent(params *InitiateRequestParams) []byte {
+func (r *InitiateRequest) buildInitiateRequestContent() []byte {
 	buffer := make([]byte, 1024)
 	bufPos := 0
 
 	// localDetailCalling (Context-specific 0, INTEGER)
 	// Максимальный размер PDU, который может принять клиент
 	tempBuf := make([]byte, 256)
-	tempPos := ber.EncodeUInt32(params.LocalDetailCalling, tempBuf, 0)
+	tempPos := ber.EncodeUInt32(r.LocalDetailCalling, tempBuf, 0)
 	intValue := tempBuf[0:tempPos]
 	bufPos = ber.EncodeTL(0x80, uint32(len(intValue)), buffer, bufPos)
 	copy(buffer[bufPos:], intValue)
@@ -302,7 +560,7 @@ func buildInitiateRequestContent(params *InitiateRequestParams) []byte {
 
 	// proposedMaxServOutstandingCalling (Context-specific 1, INTEGER)
 	// Максимальное количество одновременных запросов от клиента к серверу
-	tempPos = ber.EncodeUInt32(params.ProposedMaxServOutstandingCalling, tempBuf, 0)
+	tempPos = ber.EncodeUInt32(r.ProposedMaxServOutstandingCalling, tempBuf, 0)
 	intValue = tempBuf[0:tempPos]
 	bufPos = ber.EncodeTL(0x81, uint32(len(intValue)), buffer, bufPos)
 	copy(buffer[bufPos:], intValue)
@@ -310,7 +568,7 @@ func buildInitiateRequestContent(params *InitiateRequestParams) []byte {
 
 	// proposedMaxServOutstandingCalled (Context-specific 2, INTEGER)
 	// Максимальное количество одновременных запросов от сервера к клиенту
-	tempPos = ber.EncodeUInt32(params.ProposedMaxServOutstandingCalled, tempBuf, 0)
+	tempPos = ber.EncodeUInt32(r.ProposedMaxServOutstandingCalled, tempBuf, 0)
 	intValue = tempBuf[0:tempPos]
 	bufPos = ber.EncodeTL(0x82, uint32(len(intValue)), buffer, bufPos)
 	copy(buffer[bufPos:], intValue)
@@ -318,7 +576,7 @@ func buildInitiateRequestContent(params *InitiateRequestParams) []byte {
 
 	// proposedDataStructureNestingLevel (Context-specific 3, INTEGER)
 	// Максимальный уровень вложенности структур данных
-	tempPos = ber.EncodeUInt32(params.ProposedDataStructureNestingLevel, tempBuf, 0)
+	tempPos = ber.EncodeUInt32(r.ProposedDataStructureNestingLevel, tempBuf, 0)
 	intValue = tempBuf[0:tempPos]
 	bufPos = ber.EncodeTL(0x83, uint32(len(intValue)), buffer, bufPos)
 	copy(buffer[bufPos:], intValue)
@@ -326,7 +584,7 @@ func buildInitiateRequestContent(params *InitiateRequestParams) []byte {
 
 	// mmsInitRequestDetail (Application 4, Constructed)
 	// Содержит версию протокола, поддерживаемые параметры и услуги
-	mmsDetail := buildMMSInitRequestDetail(params)
+	mmsDetail := r.buildMMSInitRequestDetail()
 	copy(buffer[bufPos:], mmsDetail)
 	bufPos += len(mmsDetail)
 
@@ -339,14 +597,14 @@ func buildInitiateRequestContent(params *InitiateRequestParams) []byte {
 // - proposedParameterCBB (Context-specific 1, BIT STRING) - поддерживаемые параметры
 // - servicesSupportedCalling (Context-specific 2, BIT STRING) - поддерживаемые услуги
 // Значения берутся из параметров и кодируются в BER формате.
-func buildMMSInitRequestDetail(params *InitiateRequestParams) []byte {
+func (r *InitiateRequest) buildMMSInitRequestDetail() []byte {
 	buffer := make([]byte, 512)
 	bufPos := 0
 
 	// proposedVersionNumber (Context-specific 0, INTEGER)
 	// Версия протокола MMS (обычно 1)
 	tempBuf := make([]byte, 256)
-	tempPos := ber.EncodeUInt32(params.ProposedVersionNumber, tempBuf, 0)
+	tempPos := ber.EncodeUInt32(r.ProposedVersionNumber, tempBuf, 0)
 	intValue := tempBuf[0:tempPos]
 	bufPos = ber.EncodeTL(0x80, uint32(len(intValue)), buffer, bufPos)
 	copy(buffer[bufPos:], intValue)
@@ -356,20 +614,24 @@ func buildMMSInitRequestDetail(params *InitiateRequestParams) []byte {
 	// Поддерживаемые параметры (Parameter CBB - Capability Bit Box)
 	// BIT STRING кодируется как: tag + length + unused_bits + data
 	// Для параметров используется 5 бит padding (неиспользуемых бит в последнем байте)
-	bufPos = ber.EncodeTL(0x81, uint32(len(params.ProposedParameterCBB)+1), buffer, bufPos)
+	// Конвертируем слайс битов в битовую маску
+	paramCBBBytes := ber.EncodeBitmaskFromOffsets(r.ProposedParameterCBB, ProposedParameterCBBBitmaskSize)
+	bufPos = ber.EncodeTL(0x81, uint32(len(paramCBBBytes)+1), buffer, bufPos)
 	buffer[bufPos] = 0x05 // 5 бит неиспользуемых в последнем байте
 	bufPos++
-	copy(buffer[bufPos:], params.ProposedParameterCBB)
-	bufPos += len(params.ProposedParameterCBB)
+	copy(buffer[bufPos:], paramCBBBytes)
+	bufPos += len(paramCBBBytes)
 
 	// servicesSupportedCalling (Context-specific 2, BIT STRING)
 	// Поддерживаемые услуги (Services Supported)
 	// Для услуг используется 3 бита padding
-	bufPos = ber.EncodeTL(0x82, uint32(len(params.ServicesSupportedCalling)+1), buffer, bufPos)
+	// Конвертируем слайс битов в битовую маску
+	servicesBytes := ber.EncodeBitmaskFromOffsets(r.ServicesSupportedCalling, ServicesSupportedCallingBitmaskSize)
+	bufPos = ber.EncodeTL(0x82, uint32(len(servicesBytes)+1), buffer, bufPos)
 	buffer[bufPos] = 0x03 // 3 бита неиспользуемых в последнем байте
 	bufPos++
-	copy(buffer[bufPos:], params.ServicesSupportedCalling)
-	bufPos += len(params.ServicesSupportedCalling)
+	copy(buffer[bufPos:], servicesBytes)
+	bufPos += len(servicesBytes)
 
 	// Обёртка в Application 4 (mmsInitRequestDetail)
 	// 0xA4 = Application 4, Constructed

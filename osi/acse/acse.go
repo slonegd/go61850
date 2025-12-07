@@ -3,6 +3,7 @@ package acse
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/slonegd/go61850/ber"
 )
@@ -720,4 +721,437 @@ func encodeInteger(value int32, buffer []byte, bufPos int) int {
 	}
 	// For larger values, use the standard BER encoding
 	return ber.EncodeInt32(value, buffer, bufPos)
+}
+
+// ACSEPDUType represents the type of ACSE PDU
+type ACSEPDUType uint8
+
+const (
+	AARQ ACSEPDUType = 0x60 // AARQ (Association Request)
+	AARE ACSEPDUType = 0x61 // AARE (Association Response)
+	RLRQ ACSEPDUType = 0x62 // RLRQ (Release Request)
+	RLRE ACSEPDUType = 0x63 // RLRE (Release Response)
+	ABRT ACSEPDUType = 0x64 // ABRT (Abort)
+)
+
+// ACSEPDU represents an ACSE Protocol Data Unit for logging purposes
+// Based on parseAarePdu and parseAarqPdu from acse.c
+type ACSEPDU struct {
+	Type                   ACSEPDUType
+	ApplicationContextName []byte // OID (e.g., 1.0.9506.2.3 for MMS)
+	Result                 uint32 // Result code (for AARE: 0=accepted, 1=reject-permanent, 2=reject-transient)
+	ResultSourceDiagnostic uint32 // Result source diagnostic (for AARE: 1=service-user)
+	IndirectReference      uint32 // Indirect reference from user information
+	Encoding               uint8  // Encoding type (0=single-ASN1-type)
+	Data                   []byte // MMS data (user data)
+}
+
+// ParseACSEPDU parses an ACSE PDU from byte buffer and returns a structure for logging
+// Based on AcseConnection_parseMessage, parseAarqPdu, and parseAarePdu from acse.c
+func ParseACSEPDU(data []byte) (*ACSEPDU, error) {
+	if len(data) < 1 {
+		return nil, errors.New("ACSE PDU too short: need at least 1 byte")
+	}
+
+	pdu := &ACSEPDU{}
+	bufPos := 0
+	messageType := data[bufPos]
+	bufPos++
+
+	newPos, _, err := ber.DecodeLength(data, bufPos, len(data))
+	if err != nil {
+		return nil, fmt.Errorf("invalid ACSE message: %w", err)
+	}
+	bufPos = newPos
+
+	maxBufPos := len(data)
+
+	pduType := ACSEPDUType(messageType)
+	switch pduType {
+	case AARQ:
+		pdu.Type = AARQ
+		return parseAarqPduForLogging(pdu, data, bufPos, maxBufPos)
+	case AARE:
+		pdu.Type = AARE
+		return parseAarePduForLogging(pdu, data, bufPos, maxBufPos)
+	case RLRQ:
+		pdu.Type = RLRQ
+		return pdu, nil
+	case RLRE:
+		pdu.Type = RLRE
+		return pdu, nil
+	case ABRT:
+		pdu.Type = ABRT
+		return pdu, nil
+	default:
+		return nil, fmt.Errorf("unknown ACSE message type: 0x%02x", messageType)
+	}
+}
+
+// parseAarePduForLogging parses an AARE PDU for logging purposes
+// Based on parseAarePdu from acse.c (lines 183-279)
+func parseAarePduForLogging(pdu *ACSEPDU, buffer []byte, bufPos, maxBufPos int) (*ACSEPDU, error) {
+	userInfoValid := false
+	result := uint32(99)
+
+	for bufPos < maxBufPos {
+		tag := buffer[bufPos]
+		bufPos++
+
+		newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PDU: %w", err)
+		}
+		bufPos = newPos
+
+		if length == 0 {
+			continue
+		}
+
+		if bufPos+length > maxBufPos {
+			return nil, errors.New("invalid PDU: buffer overflow")
+		}
+
+		switch tag {
+		case 0xa1: // application context name
+			if length > 0 && bufPos+length <= maxBufPos {
+				// Skip OID tag (0x06) and get OID value
+				if bufPos < maxBufPos && buffer[bufPos] == 0x06 {
+					bufPos++ // skip OID tag
+					if bufPos < maxBufPos {
+						oidLength := int(buffer[bufPos])
+						bufPos++
+						if oidLength > 0 && bufPos+oidLength <= maxBufPos {
+							pdu.ApplicationContextName = make([]byte, oidLength)
+							copy(pdu.ApplicationContextName, buffer[bufPos:bufPos+oidLength])
+							bufPos += oidLength
+						} else {
+							bufPos += length - 2
+						}
+					} else {
+						bufPos += length - 1
+					}
+				} else {
+					bufPos += length
+				}
+			} else {
+				bufPos += length
+			}
+
+		case 0xa2: // result
+			bufPos++ // skip tag
+			newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+			if err != nil {
+				return nil, fmt.Errorf("invalid PDU: %w", err)
+			}
+			bufPos = newPos
+
+			result = ber.DecodeUint32(buffer, length, bufPos)
+			pdu.Result = result
+			bufPos += length
+
+		case 0xa3: // result source diagnostic
+			// Parse result source diagnostic
+			// According to ISO 8650-1, result-source-diagnostic can be:
+			// - service-user (0xa1): value = 1
+			// - service-provider (0xa2): value = 2
+			if bufPos < maxBufPos {
+				diagTag := buffer[bufPos]
+				bufPos++
+				if bufPos < maxBufPos {
+					newPos, diagLength, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+					if err == nil {
+						bufPos = newPos
+						if diagTag == 0xa1 { // service-user
+							// service-user means ResultSourceDiagnostic = 1
+							pdu.ResultSourceDiagnostic = 1
+							// Skip the rest of the diagnostic (the null value inside)
+							bufPos += diagLength
+						} else if diagTag == 0xa2 { // service-provider
+							// service-provider means ResultSourceDiagnostic = 2
+							pdu.ResultSourceDiagnostic = 2
+							bufPos += diagLength
+						} else {
+							bufPos += diagLength
+						}
+					} else {
+						bufPos += length - 1
+					}
+				} else {
+					bufPos += length - 1
+				}
+			} else {
+				bufPos += length
+			}
+
+		case 0xbe: // user information
+			if bufPos < maxBufPos && buffer[bufPos] != 0x28 {
+				bufPos += length
+			} else {
+				bufPos++ // skip 0x28 tag
+				newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+				if err != nil {
+					return nil, fmt.Errorf("invalid PDU: %w", err)
+				}
+				bufPos = newPos
+
+				// Parse user information
+				userInfoEnd := bufPos + length
+				for bufPos < userInfoEnd && bufPos < maxBufPos {
+					userTag := buffer[bufPos]
+					bufPos++
+
+					if bufPos >= maxBufPos {
+						break
+					}
+
+					newPos, userLength, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+					if err != nil {
+						break
+					}
+					bufPos = newPos
+
+					switch userTag {
+					case 0x02: // indirect-reference
+						pdu.IndirectReference = ber.DecodeUint32(buffer, userLength, bufPos)
+						bufPos += userLength
+						userInfoValid = true
+
+					case 0xa0: // encoding (single-ASN1-type)
+						pdu.Encoding = 0 // single-ASN1-type
+						if bufPos+userLength <= maxBufPos {
+							pdu.Data = make([]byte, userLength)
+							copy(pdu.Data, buffer[bufPos:bufPos+userLength])
+							bufPos += userLength
+							userInfoValid = true
+						} else {
+							bufPos += userLength
+						}
+
+					default:
+						bufPos += userLength
+					}
+				}
+			}
+
+		case 0x00: // indefinite length end tag -> ignore
+			break
+
+		default:
+			bufPos += length
+		}
+	}
+
+	if !userInfoValid {
+		return nil, errors.New("user info invalid")
+	}
+
+	return pdu, nil
+}
+
+// parseAarqPduForLogging parses an AARQ PDU for logging purposes
+// Based on parseAarqPdu from acse.c (lines 281-446)
+func parseAarqPduForLogging(pdu *ACSEPDU, buffer []byte, bufPos, maxBufPos int) (*ACSEPDU, error) {
+	userInfoValid := false
+
+	for bufPos < maxBufPos {
+		tag := buffer[bufPos]
+		bufPos++
+
+		newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PDU: %w", err)
+		}
+		bufPos = newPos
+
+		if length == 0 {
+			continue
+		}
+
+		if bufPos+length > maxBufPos {
+			return nil, errors.New("invalid PDU: buffer overflow")
+		}
+
+		switch tag {
+		case 0xa1: // application context name
+			if length > 0 && bufPos+length <= maxBufPos {
+				// Skip OID tag (0x06) and get OID value
+				if bufPos < maxBufPos && buffer[bufPos] == 0x06 {
+					bufPos++ // skip OID tag
+					if bufPos < maxBufPos {
+						oidLength := int(buffer[bufPos])
+						bufPos++
+						if oidLength > 0 && bufPos+oidLength <= maxBufPos {
+							pdu.ApplicationContextName = make([]byte, oidLength)
+							copy(pdu.ApplicationContextName, buffer[bufPos:bufPos+oidLength])
+							bufPos += oidLength
+						} else {
+							bufPos += length - 2
+						}
+					} else {
+						bufPos += length - 1
+					}
+				} else {
+					bufPos += length
+				}
+			} else {
+				bufPos += length
+			}
+
+		case 0xa2, 0xa3, 0xa6, 0xa7, 0x8a, 0x8b, 0xac: // other fields we skip
+			bufPos += length
+
+		case 0xbe: // user information
+			if bufPos < maxBufPos && buffer[bufPos] != 0x28 {
+				bufPos += length
+			} else {
+				bufPos++ // skip 0x28 tag
+				newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+				if err != nil {
+					return nil, fmt.Errorf("invalid PDU: %w", err)
+				}
+				bufPos = newPos
+
+				// Parse user information
+				userInfoEnd := bufPos + length
+				for bufPos < userInfoEnd && bufPos < maxBufPos {
+					userTag := buffer[bufPos]
+					bufPos++
+
+					if bufPos >= maxBufPos {
+						break
+					}
+
+					newPos, userLength, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+					if err != nil {
+						break
+					}
+					bufPos = newPos
+
+					switch userTag {
+					case 0x02: // indirect-reference
+						pdu.IndirectReference = ber.DecodeUint32(buffer, userLength, bufPos)
+						bufPos += userLength
+						userInfoValid = true
+
+					case 0xa0: // encoding (single-ASN1-type)
+						pdu.Encoding = 0 // single-ASN1-type
+						if bufPos+userLength <= maxBufPos {
+							pdu.Data = make([]byte, userLength)
+							copy(pdu.Data, buffer[bufPos:bufPos+userLength])
+							bufPos += userLength
+							userInfoValid = true
+						} else {
+							bufPos += userLength
+						}
+
+					default:
+						bufPos += userLength
+					}
+				}
+			}
+
+		case 0x00: // indefinite length end tag -> ignore
+			break
+
+		default:
+			bufPos += length
+		}
+	}
+
+	if !userInfoValid {
+		return nil, errors.New("user info invalid")
+	}
+
+	return pdu, nil
+}
+
+// String implements fmt.Stringer for ACSEPDU
+func (p *ACSEPDU) String() string {
+	var builder strings.Builder
+
+	typeStr := ""
+	switch p.Type {
+	case AARQ:
+		typeStr = "AARQ"
+	case AARE:
+		typeStr = "AARE"
+	case RLRQ:
+		typeStr = "RLRQ"
+	case RLRE:
+		typeStr = "RLRE"
+	case ABRT:
+		typeStr = "ABRT"
+	default:
+		typeStr = fmt.Sprintf("Unknown(0x%02x)", uint8(p.Type))
+	}
+
+	builder.WriteString("ACSEPDU{Type: ")
+	builder.WriteString(typeStr)
+	fmt.Fprintf(&builder, " (0x%02x)", uint8(p.Type))
+
+	if len(p.ApplicationContextName) > 0 {
+		// Format OID
+		oidStr := formatOID(p.ApplicationContextName)
+		builder.WriteString(", ApplicationContextName: ")
+		builder.WriteString(oidStr)
+	}
+
+	if p.Type == AARE {
+		resultStr := ""
+		switch p.Result {
+		case 0:
+			resultStr = "accepted"
+		case 1:
+			resultStr = "reject-permanent"
+		case 2:
+			resultStr = "reject-transient"
+		default:
+			resultStr = fmt.Sprintf("unknown(%d)", p.Result)
+		}
+		fmt.Fprintf(&builder, ", Result: %d (%s)", p.Result, resultStr)
+
+		if p.ResultSourceDiagnostic != 0 {
+			diagStr := ""
+			if p.ResultSourceDiagnostic == 1 {
+				diagStr = "service-user (1)"
+			} else {
+				diagStr = fmt.Sprintf("%d", p.ResultSourceDiagnostic)
+			}
+			fmt.Fprintf(&builder, ", ResultSourceDiagnostic: %s", diagStr)
+		}
+	}
+
+	if p.IndirectReference != 0 {
+		fmt.Fprintf(&builder, ", IndirectReference: %d", p.IndirectReference)
+	}
+
+	if p.Encoding == 0 {
+		fmt.Fprintf(&builder, ", Encoding: %d (single-ASN1-type)", p.Encoding)
+	} else if p.Encoding != 0 {
+		fmt.Fprintf(&builder, ", Encoding: %d", p.Encoding)
+	}
+
+	fmt.Fprintf(&builder, ", DataLength: %d}", len(p.Data))
+
+	return builder.String()
+}
+
+// formatOID formats an OID byte array as a string
+func formatOID(oid []byte) string {
+	if len(oid) == 0 {
+		return "[]"
+	}
+	if len(oid) == 5 && oid[0] == 0x28 && oid[1] == 0xca && oid[2] == 0x22 && oid[3] == 0x02 && oid[4] == 0x03 {
+		return "1.0.9506.2.3 (MMS)"
+	}
+	if len(oid) == 4 && oid[0] == 0x52 && oid[1] == 0x01 && oid[2] == 0x00 && oid[3] == 0x01 {
+		return "2.2.1.0.1 (id-as-acse)"
+	}
+	// Generic OID formatting
+	var parts []string
+	for _, b := range oid {
+		parts = append(parts, fmt.Sprintf("%02x", b))
+	}
+	return fmt.Sprintf("[%s]", strings.Join(parts, " "))
 }

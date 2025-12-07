@@ -55,6 +55,9 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 	// Создаём логгер для presentation с категорией [presentation]
 	presentationLogger := logger.NewLogger("presentation")
 
+	// Создаём логгер для acse с категорией [acse]
+	acseLogger := logger.NewLogger("acse")
+
 	// --- Шаг 1: Отправка COTP CR TPDU ---
 	params := &cotp.IsoConnectionParameters{
 		RemoteTSelector: cotp.TSelector{Value: []byte{0, 1}},
@@ -116,8 +119,14 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 	// --- Шаг 3: Создание полного пакета MMS Initiate Request ---
 	// Порядок вложенности: MMS -> ACSE -> Presentation -> Session -> COTP
 
-	// 1. Создаём MMS InitiateRequestPDU
-	mmsPdu := mms.BuildInitiateRequestPDU()
+	// 1. Создаём MMS InitiateRequest структуру
+	mmsRequest := mms.NewInitiateRequest()
+
+	// Логируем структуру
+	c.logger.Debug("MMS InitiateRequest: %s", mmsRequest)
+
+	// Получаем BER-кодированный пакет
+	mmsPdu := mmsRequest.Bytes()
 
 	// 2. Обёртываем в ACSE AARQ
 	acsePdu := acse.BuildAARQ(mmsPdu)
@@ -295,6 +304,22 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 
 		// Логируем результат парсинга
 		presentationLogger.Debug("  %s", presentationPdu)
+
+		// Парсим и логируем ACSE PDU из данных Presentation
+		if len(presentationPdu.Data) == 0 {
+			return fmt.Errorf("presentation PDU data is empty")
+		}
+
+		acsePdu, err := acse.ParseACSEPDU(presentationPdu.Data)
+		if err != nil {
+			return fmt.Errorf("failed to parse ACSE PDU: %w", err)
+		}
+		if acsePdu == nil {
+			return fmt.Errorf("ACSE PDU is nil after parsing")
+		}
+
+		// Логируем результат парсинга
+		acseLogger.Debug("  %s", acsePdu)
 		break
 	}
 
