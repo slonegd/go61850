@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/slonegd/go61850/ber"
-	"github.com/slonegd/go61850/logger"
 )
 
 // PSelector представляет селектор представления
@@ -638,11 +637,3 @@ func (p *PresentationPDU) String() string {
 	return builder.String()
 }
 
-// LogPresentationPDU логирует Presentation PDU с использованием указанного логгера
-// Используется для логирования presentation после парсинга
-func LogPresentationPDU(pdu *PresentationPDU, l logger.Logger) {
-	if pdu == nil || l == nil {
-		return
-	}
-	l.Debug("  %s", pdu)
-}

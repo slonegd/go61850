@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/slonegd/go61850/logger"
 )
 
 // SSelector представляет селектор сессии
@@ -422,11 +420,3 @@ func (s *SessionSPDU) String() string {
 	return builder.String()
 }
 
-// LogSessionSPDU логирует Session SPDU с использованием указанного логгера
-// Используется для логирования сессии после парсинга
-func LogSessionSPDU(spdu *SessionSPDU, l logger.Logger) {
-	if spdu == nil || l == nil {
-		return
-	}
-	l.Debug("  %s", spdu)
-}

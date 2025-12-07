@@ -4,7 +4,7 @@
   "imports": [
     "errors",
     "fmt",
-    "github.com/slonegd/go61850/logger"
+    "strings"
   ],
   "interfaces": {},
   "types": {
@@ -68,10 +68,6 @@
     "ParseSessionSPDU": {
       "signature": "ParseSessionSPDU(data []byte) (*SessionSPDU, error)",
       "description": "Parses Session SPDU from byte buffer, extracting all parameters including ProtocolOptions, ProtocolVersion, SessionRequirement, selectors, and user data"
-    },
-    "LogSessionSPDU": {
-      "signature": "LogSessionSPDU(spdu *SessionSPDU, logger logger.Logger)",
-      "description": "Logs Session SPDU with [session] category using the specified logger"
     },
     "encodeConnectAcceptItem": {
       "signature": "encodeConnectAcceptItem(buf []byte, offset int, options uint8) int",

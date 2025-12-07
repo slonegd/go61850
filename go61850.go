@@ -19,6 +19,11 @@ type MmsClient struct {
 	logger   logger.Logger
 }
 
+// defaultLogger создает логгер по умолчанию с категорией go61850
+func defaultLogger() logger.Logger {
+	return logger.NewLogger("go61850")
+}
+
 // MmsClientOption представляет опцию для настройки MmsClient
 type MmsClientOption func(*MmsClient)
 
@@ -31,7 +36,8 @@ func WithLogger(l logger.Logger) MmsClientOption {
 
 func NewMmsClient(conn net.Conn, opts ...MmsClientOption) *MmsClient {
 	client := &MmsClient{
-		conn: conn,
+		conn:   conn,
+		logger: defaultLogger(),
 	}
 	for _, opt := range opts {
 		opt(client)
@@ -41,23 +47,13 @@ func NewMmsClient(conn net.Conn, opts ...MmsClientOption) *MmsClient {
 
 func (c *MmsClient) Initiate(ctx context.Context) error {
 	// Создаём COTP соединение
-	ops := []cotp.ConnectionOption{}
-	if c.logger != nil {
-		ops = append(ops, cotp.WithLogger(c.logger))
-	}
-	c.cotpConn = cotp.NewConnection(c.conn, ops...)
+	c.cotpConn = cotp.NewConnection(c.conn, cotp.WithLogger(c.logger))
 
 	// Создаём логгер для session с категорией [session]
-	var sessionLogger logger.Logger
-	if c.logger != nil {
-		sessionLogger = logger.NewLogger("session")
-	}
+	sessionLogger := logger.NewLogger("session")
 
 	// Создаём логгер для presentation с категорией [presentation]
-	var presentationLogger logger.Logger
-	if c.logger != nil {
-		presentationLogger = logger.NewLogger("presentation")
-	}
+	presentationLogger := logger.NewLogger("presentation")
 
 	// --- Шаг 1: Отправка COTP CR TPDU ---
 	params := &cotp.IsoConnectionParameters{
@@ -239,41 +235,67 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 			return fmt.Errorf("failed to read TPKT: %w", err)
 		}
 
-		if state == cotp.TpktPacketComplete {
-			indication, err := c.cotpConn.ParseIncomingMessage()
-			if err != nil {
-				return fmt.Errorf("failed to parse COTP message: %w", err)
-			}
-
-			if indication == cotp.IndicationData {
-				// Парсим и логируем Session SPDU из данных COTP
-				payload := c.cotpConn.GetPayload()
-				if len(payload) > 0 {
-					// Парсим Session SPDU
-					sessionPdu, err := session.ParseSessionSPDU(payload)
-					if err == nil && sessionPdu != nil {
-						// Логируем результат парсинга
-						session.LogSessionSPDU(sessionPdu, sessionLogger)
-
-						// Парсим и логируем Presentation PDU из данных Session
-						if len(sessionPdu.Data) > 0 {
-							presentationPdu, err := presentation.ParsePresentationPDU(sessionPdu.Data)
-							if err == nil && presentationPdu != nil {
-								// Логируем результат парсинга
-								presentation.LogPresentationPDU(presentationPdu, presentationLogger)
-							}
-						}
-					}
-				}
-				c.cotpConn.ResetPayload()
-				break
-			} else if indication == cotp.IndicationMoreFragmentsFollow {
-				// Продолжаем читать фрагменты
-				continue
-			}
-		} else if state == cotp.TpktError {
+		if state == cotp.TpktError {
 			return fmt.Errorf("TPKT read error")
 		}
+
+		if state == cotp.TpktWaiting {
+			continue
+		}
+
+		// state == cotp.TpktPacketComplete
+		indication, err := c.cotpConn.ParseIncomingMessage()
+		if err != nil {
+			return fmt.Errorf("failed to parse COTP message: %w", err)
+		}
+
+		if indication == cotp.IndicationMoreFragmentsFollow {
+			// Продолжаем читать фрагменты
+			continue
+		}
+
+		if indication != cotp.IndicationData {
+			return fmt.Errorf("unexpected COTP indication: %d", indication)
+		}
+
+		// indication == cotp.IndicationData
+		// Парсим и логируем Session SPDU из данных COTP
+		payload := c.cotpConn.GetPayload()
+		// Сбрасываем payload в конце обработки
+		defer c.cotpConn.ResetPayload()
+
+		if len(payload) == 0 {
+			return fmt.Errorf("received empty COTP payload")
+		}
+
+		// Парсим Session SPDU
+		sessionPdu, err := session.ParseSessionSPDU(payload)
+		if err != nil {
+			return fmt.Errorf("failed to parse Session SPDU: %w", err)
+		}
+		if sessionPdu == nil {
+			return fmt.Errorf("session SPDU is nil after parsing")
+		}
+
+		// Логируем результат парсинга
+		sessionLogger.Debug("  %s", sessionPdu)
+
+		// Парсим и логируем Presentation PDU из данных Session
+		if len(sessionPdu.Data) == 0 {
+			return fmt.Errorf("session SPDU data is empty")
+		}
+
+		presentationPdu, err := presentation.ParsePresentationPDU(sessionPdu.Data)
+		if err != nil {
+			return fmt.Errorf("failed to parse Presentation PDU: %w", err)
+		}
+		if presentationPdu == nil {
+			return fmt.Errorf("presentation PDU is nil after parsing")
+		}
+
+		// Логируем результат парсинга
+		presentationLogger.Debug("  %s", presentationPdu)
+		break
 	}
 
 	return nil

@@ -5,6 +5,7 @@
     "context",
     "fmt",
     "net",
+    "github.com/slonegd/go61850/logger",
     "github.com/slonegd/go61850/osi/acse",
     "github.com/slonegd/go61850/osi/cotp",
     "github.com/slonegd/go61850/osi/mms",
@@ -17,7 +18,7 @@
       "fields": [
         {"name": "conn", "type": "net.Conn", "description": "Network connection"},
         {"name": "cotpConn", "type": "*cotp.Connection", "description": "COTP connection instance"},
-        {"name": "logger", "type": "cotp.Logger", "description": "Optional logger for debugging"}
+        {"name": "logger", "type": "logger.Logger", "description": "Logger for debugging (always initialized with default logger, can be replaced via WithLogger option)"}
       ],
       "methods": [
         {
@@ -34,14 +35,19 @@
   },
   "functions": [
     {
+      "name": "defaultLogger",
+      "signature": "defaultLogger() logger.Logger",
+      "description": "Creates default logger with category 'go61850'"
+    },
+    {
       "name": "NewMmsClient",
       "signature": "NewMmsClient(conn net.Conn, opts ...MmsClientOption) *MmsClient",
-      "description": "Creates new MMS client with optional configuration"
+      "description": "Creates new MMS client with default logger (can be replaced via WithLogger option)"
     },
     {
       "name": "WithLogger",
-      "signature": "WithLogger(logger cotp.Logger) MmsClientOption",
-      "description": "Sets logger for MmsClient"
+      "signature": "WithLogger(logger logger.Logger) MmsClientOption",
+      "description": "Sets custom logger for MmsClient (replaces default logger)"
     }
   ]
 }
