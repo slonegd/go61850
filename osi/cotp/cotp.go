@@ -41,9 +41,9 @@ func defaultConnectionOptions() connectionOptions {
 	}
 }
 
-// defaultLogger создает логгер по умолчанию с категорией cotp
+// defaultLogger создает логгер по умолчанию без категории
 func defaultLogger() logger.Logger {
-	return logger.NewLogger("cotp")
+	return logger.NewLogger("")
 }
 
 // ConnectionOption представляет опцию для настройки Connection

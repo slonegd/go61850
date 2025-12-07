@@ -290,6 +290,34 @@ func DecodeOID(buffer []byte, bufPos, length int, oid *ItuObjectIdentifier) {
 	oid.ArcCount = currentArc
 }
 
+// DecodeBitmaskFromBytes decodes a BER bit string from bytes and returns a list of set bit offsets.
+// The bitmask is decoded in BER format with big-endian bit order within each byte.
+// paddingBits specifies the number of unused bits in the last byte (from BER encoding).
+// bitmaskSize specifies the expected size of the bitmask in bytes.
+// Returns a slice of bit offsets (0-based index from the start of the bit string).
+// In BER format, bits are numbered from left to right (MSB first), so bit 0 is the leftmost bit.
+func DecodeBitmaskFromBytes(bitmask []byte, paddingBits byte, bitmaskSize int) []uint {
+	if len(bitmask) < bitmaskSize {
+		bitmaskSize = len(bitmask)
+	}
+	
+	var offsets []uint
+	totalBits := bitmaskSize*8 - int(paddingBits)
+	
+	for bitIndex := uint(0); bitIndex < uint(totalBits); bitIndex++ {
+		byteIndex := int(bitIndex / 8)
+		bitOffsetInByte := 7 - int(bitIndex%8) // BER: MSB first (bit 0 is leftmost)
+		
+		if byteIndex < len(bitmask) {
+			if (bitmask[byteIndex] & (1 << bitOffsetInByte)) != 0 {
+				offsets = append(offsets, bitIndex)
+			}
+		}
+	}
+	
+	return offsets
+}
+
 // Encoder functions
 
 // EncodeLength encodes a length value in BER format

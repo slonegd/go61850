@@ -218,7 +218,19 @@ func proofOfConcept(conn net.Conn, l logger.Logger) error {
 	client := go61850.NewMmsClient(conn, opts...)
 
 	ctx := context.Background()
-	return client.Initiate(ctx)
+	response, err := client.Initiate(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Выводим результат в лог
+	if l != nil {
+		l.Debug("MMS InitiateResponse: %s", response)
+	} else {
+		log.Printf("MMS InitiateResponse: %s", response)
+	}
+
+	return nil
 }
 
 func main() {
@@ -236,7 +248,7 @@ func main() {
 	log.Printf("Connected to %s\n", address)
 
 	// Создаём логгер для вывода логов всех уровней
-	l := logger.NewLogger("cotp")
+	l := logger.NewLogger("")
 	err = proofOfConcept(conn, l)
 	if err != nil {
 		log.Fatalf("Proof of Concept failed: %v", err)

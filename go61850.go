@@ -19,9 +19,9 @@ type MmsClient struct {
 	logger   logger.Logger
 }
 
-// defaultLogger создает логгер по умолчанию с категорией go61850
+// defaultLogger создает логгер по умолчанию без категории
 func defaultLogger() logger.Logger {
-	return logger.NewLogger("go61850")
+	return logger.NewLogger("")
 }
 
 // MmsClientOption представляет опцию для настройки MmsClient
@@ -45,18 +45,9 @@ func NewMmsClient(conn net.Conn, opts ...MmsClientOption) *MmsClient {
 	return client
 }
 
-func (c *MmsClient) Initiate(ctx context.Context) error {
+func (c *MmsClient) Initiate(ctx context.Context, opts ...mms.InitiateRequestOption) (*mms.InitiateResponse, error) {
 	// Создаём COTP соединение
 	c.cotpConn = cotp.NewConnection(c.conn, cotp.WithLogger(c.logger))
-
-	// Создаём логгер для session с категорией [session]
-	sessionLogger := logger.NewLogger("session")
-
-	// Создаём логгер для presentation с категорией [presentation]
-	presentationLogger := logger.NewLogger("presentation")
-
-	// Создаём логгер для acse с категорией [acse]
-	acseLogger := logger.NewLogger("acse")
 
 	// --- Шаг 1: Отправка COTP CR TPDU ---
 	params := &cotp.IsoConnectionParameters{
@@ -66,14 +57,14 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 
 	err := c.cotpConn.SendConnectionRequestMessage(params)
 	if err != nil {
-		return fmt.Errorf("failed to send COTP CR: %w", err)
+		return nil, fmt.Errorf("failed to send COTP CR: %w", err)
 	}
 
 	// --- Шаг 2: Получение COTP CC TPDU ---
 	for {
 		// Проверяем контекст перед каждой итерацией цикла
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 
 		// ответ от сервера
@@ -99,28 +90,28 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 		// Source TSAP: 0001
 		state, err := c.cotpConn.ReadToTpktBuffer(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to read TPKT: %w", err)
+			return nil, fmt.Errorf("failed to read TPKT: %w", err)
 		}
 
 		if state == cotp.TpktPacketComplete {
 			indication, err := c.cotpConn.ParseIncomingMessage()
 			if err != nil {
-				return fmt.Errorf("failed to parse COTP message: %w", err)
+				return nil, fmt.Errorf("failed to parse COTP message: %w", err)
 			}
 
 			if indication == cotp.IndicationConnect {
 				break
 			}
 		} else if state == cotp.TpktError {
-			return fmt.Errorf("TPKT read error")
+			return nil, fmt.Errorf("TPKT read error")
 		}
 	}
 
 	// --- Шаг 3: Создание полного пакета MMS Initiate Request ---
 	// Порядок вложенности: MMS -> ACSE -> Presentation -> Session -> COTP
 
-	// 1. Создаём MMS InitiateRequest структуру
-	mmsRequest := mms.NewInitiateRequest()
+	// 1. Создаём MMS InitiateRequest структуру с опциями
+	mmsRequest := mms.NewInitiateRequest(opts...)
 
 	// Логируем структуру
 	c.logger.Debug("MMS InitiateRequest: %s", mmsRequest)
@@ -140,18 +131,44 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 	// 5. Отправляем через COTP
 	err = c.cotpConn.SendDataMessage(sessionPdu)
 	if err != nil {
-		return fmt.Errorf("failed to send data: %w", err)
+		return nil, fmt.Errorf("failed to send data: %w", err)
 	}
 
 	// --- Шаг 4: Получение ответа ---
 	for {
 		// Проверяем контекст перед каждой итерацией цикла
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 
 		// ответ от сервера
 		// RX: 03 00 00 8f 02 f0 80 0e 86 05 06 13 01 00 16 01 02 14 02 00 02 34 02 00 01 c1 74 31 72 a0 03 80 01 01 a2 6b 83 04 00 00 00 01 a5 12 30 07 80 01 00 81 02 51 01 30 07 80 01 00 81 02 51 01 61 4f 30 4d 02 01 01 a0 48 61 46 a1 07 06 05 28 ca 22 02 03 a2 03 02 01 00 a3 05 a1 03 02 01 00 be 2f 28 2d 02 01 03 a0 28 a9 26 80 03 00 fd e8 81 01 05 82 01 05 83 01 0a a4 16 80 01 01 81 03 05 f1 00 82 0c 03 ee 1c 00 00 00 02 00 00 40 ed 18
+		// Пример MMS Initiate Response PDU (после извлечения из ACSE):
+		// a9 26 80 03 00 fd e8 81 01 05 82 01 05 83 01 0a a4 16 80 01 01 81 03 05 f1 00 82 0c 03 ee 1c 00 00 00 02 00 00 40 ed 18
+		// где:
+		// a9 - InitiateResponsePDU tag
+		// 26 - длина (38 байт)
+		// 80 03 00 fd e8 - localDetailCalled: 65000
+		// 81 01 05 - negotiatedMaxServOutstandingCalling: 5
+		// 82 01 05 - negotiatedMaxServOutstandingCalled: 5
+		// 83 01 0a - negotiatedDataStructureNestingLevel: 10
+		// a4 16 - mmsInitResponseDetail (длина 22 байта)
+		//   80 01 01 - negotiatedVersionNumber: 1
+		//   81 03 05 f1 00 - negotiatedParameterCBB: padding 5, битовая маска f100
+		//   82 0c 03 ee 1c 00 00 00 02 00 00 40 ed 18 - servicesSupportedCalled: padding 3, битовая маска ee1c00000002000040ed18
+		// Пример MMS Initiate Response PDU (после извлечения из ACSE):
+		// a9 26 80 03 00 fd e8 81 01 05 82 01 05 83 01 0a a4 16 80 01 01 81 03 05 f1 00 82 0c 03 ee 1c 00 00 00 02 00 00 40 ed 18
+		// где:
+		// a9 - InitiateResponsePDU tag
+		// 26 - длина (38 байт)
+		// 80 03 00 fd e8 - localDetailCalled: 65000
+		// 81 01 05 - negotiatedMaxServOutstandingCalling: 5
+		// 82 01 05 - negotiatedMaxServOutstandingCalled: 5
+		// 83 01 0a - negotiatedDataStructureNestingLevel: 10
+		// a4 16 - mmsInitResponseDetail (длина 22 байта)
+		//   80 01 01 - negotiatedVersionNumber: 1
+		//   81 03 05 f1 00 - negotiatedParameterCBB: padding 5, битовая маска f100
+		//   82 0c 03 ee 1c 00 00 00 02 00 00 40 ed 18 - servicesSupportedCalled: padding 3, битовая маска ee1c00000002000040ed18
 		// TPKT, Version: 3, Length: 143
 		// ISO 8073/X.224 COTP Connection-Oriented Transport Protocol
 		// Length: 2
@@ -241,11 +258,11 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 		// servicesSupportedCalled: ee1c00000002000040ed18
 		state, err := c.cotpConn.ReadToTpktBuffer(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to read TPKT: %w", err)
+			return nil, fmt.Errorf("failed to read TPKT: %w", err)
 		}
 
 		if state == cotp.TpktError {
-			return fmt.Errorf("TPKT read error")
+			return nil, fmt.Errorf("TPKT read error")
 		}
 
 		if state == cotp.TpktWaiting {
@@ -255,7 +272,7 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 		// state == cotp.TpktPacketComplete
 		indication, err := c.cotpConn.ParseIncomingMessage()
 		if err != nil {
-			return fmt.Errorf("failed to parse COTP message: %w", err)
+			return nil, fmt.Errorf("failed to parse COTP message: %w", err)
 		}
 
 		if indication == cotp.IndicationMoreFragmentsFollow {
@@ -264,7 +281,7 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 		}
 
 		if indication != cotp.IndicationData {
-			return fmt.Errorf("unexpected COTP indication: %d", indication)
+			return nil, fmt.Errorf("unexpected COTP indication: %d", indication)
 		}
 
 		// indication == cotp.IndicationData
@@ -274,54 +291,66 @@ func (c *MmsClient) Initiate(ctx context.Context) error {
 		defer c.cotpConn.ResetPayload()
 
 		if len(payload) == 0 {
-			return fmt.Errorf("received empty COTP payload")
+			return nil, fmt.Errorf("received empty COTP payload")
 		}
 
 		// Парсим Session SPDU
 		sessionPdu, err := session.ParseSessionSPDU(payload)
 		if err != nil {
-			return fmt.Errorf("failed to parse Session SPDU: %w", err)
+			return nil, fmt.Errorf("failed to parse Session SPDU: %w", err)
 		}
 		if sessionPdu == nil {
-			return fmt.Errorf("session SPDU is nil after parsing")
+			return nil, fmt.Errorf("session SPDU is nil after parsing")
 		}
 
 		// Логируем результат парсинга
-		sessionLogger.Debug("  %s", sessionPdu)
+		c.logger.Debug("  %s", sessionPdu)
 
 		// Парсим и логируем Presentation PDU из данных Session
 		if len(sessionPdu.Data) == 0 {
-			return fmt.Errorf("session SPDU data is empty")
+			return nil, fmt.Errorf("session SPDU data is empty")
 		}
 
 		presentationPdu, err := presentation.ParsePresentationPDU(sessionPdu.Data)
 		if err != nil {
-			return fmt.Errorf("failed to parse Presentation PDU: %w", err)
+			return nil, fmt.Errorf("failed to parse Presentation PDU: %w", err)
 		}
 		if presentationPdu == nil {
-			return fmt.Errorf("presentation PDU is nil after parsing")
+			return nil, fmt.Errorf("presentation PDU is nil after parsing")
 		}
 
 		// Логируем результат парсинга
-		presentationLogger.Debug("  %s", presentationPdu)
+		c.logger.Debug("  %s", presentationPdu)
 
 		// Парсим и логируем ACSE PDU из данных Presentation
 		if len(presentationPdu.Data) == 0 {
-			return fmt.Errorf("presentation PDU data is empty")
+			return nil, fmt.Errorf("presentation PDU data is empty")
 		}
 
 		acsePdu, err := acse.ParseACSEPDU(presentationPdu.Data)
 		if err != nil {
-			return fmt.Errorf("failed to parse ACSE PDU: %w", err)
+			return nil, fmt.Errorf("failed to parse ACSE PDU: %w", err)
 		}
 		if acsePdu == nil {
-			return fmt.Errorf("ACSE PDU is nil after parsing")
+			return nil, fmt.Errorf("ACSE PDU is nil after parsing")
 		}
 
 		// Логируем результат парсинга
-		acseLogger.Debug("  %s", acsePdu)
-		break
-	}
+		c.logger.Debug("  %s", acsePdu)
 
-	return nil
+		// Парсим MMS Initiate Response из данных ACSE
+		if len(acsePdu.Data) == 0 {
+			return nil, fmt.Errorf("ACSE PDU data is empty")
+		}
+
+		mmsResponse, err := mms.ParseInitiateResponse(acsePdu.Data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse MMS Initiate Response: %w", err)
+		}
+		if mmsResponse == nil {
+			return nil, fmt.Errorf("MMS Initiate Response is nil after parsing")
+		}
+
+		return mmsResponse, nil
+	}
 }

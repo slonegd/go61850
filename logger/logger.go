@@ -18,6 +18,10 @@ func NewLogger(category string) Logger {
 }
 
 func (l *stdLogger) Debug(format string, v ...any) {
-	log.Printf("["+l.category+"] "+format, v...)
+	if l.category == "" {
+		log.Printf(format, v...)
+	} else {
+		log.Printf("["+l.category+"] "+format, v...)
+	}
 }
 

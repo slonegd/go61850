@@ -23,8 +23,8 @@
       "methods": [
         {
           "name": "Initiate",
-          "signature": "Initiate(ctx context.Context) error",
-          "description": "Establishes COTP connection, sends MMS Initiate Request and receives response"
+          "signature": "Initiate(ctx context.Context, opts ...mms.InitiateRequestOption) (*mms.InitiateResponse, error)",
+          "description": "Establishes COTP connection, sends MMS Initiate Request with customizable options and receives response"
         }
       ]
     },
