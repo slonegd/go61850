@@ -223,26 +223,16 @@ func proofOfConcept(conn net.Conn, l logger.Logger) error {
 		return err
 	}
 
-	// Выводим результат в лог
-	if l != nil {
-		l.Debug("MMS InitiateResponse: %s", response)
-	} else {
-		log.Printf("MMS InitiateResponse: %s", response)
-	}
+	l.Debug("MMS InitiateResponse: %s", response)
 
 	// Читаем объект из сервера
 	objectName := "simpleIOGenericIO/GGIO1.AnIn1.mag.f"
-	readResult, err := client.ReadObject(ctx, objectName)
+	readResult, err := client.ReadObject(ctx, objectName, go61850.FCMX)
 	if err != nil {
 		return err
 	}
 
-	// Выводим результат чтения в лог
-	if l != nil {
-		l.Debug("ReadObject result: %s", readResult)
-	} else {
-		log.Printf("ReadObject result: %s", readResult)
-	}
+	l.Debug("ReadObject result: %s", readResult)
 
 	return nil
 }

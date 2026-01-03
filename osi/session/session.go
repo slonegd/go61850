@@ -187,6 +187,60 @@ func buildConnectSPDUWithSession(session *Session, userData []byte) []byte {
 	return buf[:offset]
 }
 
+// BuildGiveTokensSPDU создаёт Give tokens PDU (GT SPDU) для передачи токенов.
+// Структура согласно ISO 8327-1:
+// - SPDU Type: 1 (GT)
+// - Length: 0 (нет параметров)
+// Из wireshark: 01 00 - Give tokens PDU (тип 1, длина 0)
+func BuildGiveTokensSPDU() []byte {
+	return []byte{0x01, 0x00}
+}
+
+// BuildDataTransferSPDU создаёт DATA TRANSFER (DT) SPDU для отправки данных после установления соединения.
+// Структура DT SPDU согласно ISO 8327-1:
+// - SPDU Type: 1 (DT)
+// - Length: 0 (данные идут отдельно после SPDU)
+// - User Data: данные от Presentation уровня идут после SPDU
+// Из wireshark: 01 00 - DT SPDU с длиной 0, затем идет Presentation PDU
+// Для передачи данных после установления соединения используется формат:
+// - Type: 1
+// - Length: 0
+// - User Data: содержимое userData идет после SPDU (не включается в длину)
+func BuildDataTransferSPDU(userData []byte) []byte {
+	// DT SPDU: Type (1) + Length (0) + User Data (идет после)
+	buf := make([]byte, 2+len(userData))
+	offset := 0
+
+	// SPDU Type: DATA TRANSFER (DT) = 1
+	buf[offset] = byte(SessionSPDUTypeData)
+	offset++
+
+	// Length: 0 (данные идут отдельно)
+	buf[offset] = 0
+	offset++
+
+	// Копируем userData после SPDU
+	copy(buf[offset:], userData)
+	offset += len(userData)
+
+	return buf[:offset]
+}
+
+// BuildDataTransferWithTokens создаёт полный пакет Session для передачи данных:
+// Give tokens PDU + DT SPDU + Presentation PDU
+// Это соответствует структуре из wireshark: 01 00 01 00 <Presentation PDU>
+func BuildDataTransferWithTokens(presentationData []byte) []byte {
+	gtSPDU := BuildGiveTokensSPDU()
+	dtSPDU := BuildDataTransferSPDU(presentationData)
+	
+	// Объединяем: GT SPDU + DT SPDU (который уже включает Presentation PDU)
+	buf := make([]byte, len(gtSPDU)+len(dtSPDU))
+	copy(buf, gtSPDU)
+	copy(buf[len(gtSPDU):], dtSPDU)
+	
+	return buf
+}
+
 // SessionSPDUType представляет тип Session SPDU
 type SessionSPDUType uint8
 

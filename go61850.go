@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/slonegd/go61850/logger"
 	"github.com/slonegd/go61850/osi/acse"
@@ -355,6 +356,26 @@ func (c *MmsClient) Initiate(ctx context.Context, opts ...mms.InitiateRequestOpt
 	}
 }
 
+// FunctionalConstraint представляет функциональное ограничение IEC 61850
+type FunctionalConstraint string
+
+const (
+	FCNone FunctionalConstraint = ""   // Нет функционального ограничения
+	FCMX   FunctionalConstraint = "MX" // Measurand (измеряемая величина)
+	FCST   FunctionalConstraint = "ST" // Status (статус)
+	FCSP   FunctionalConstraint = "SP" // SetPoint (уставка)
+	FCSV   FunctionalConstraint = "SV" // Substitution Value (подстановочное значение)
+	FCCF   FunctionalConstraint = "CF" // Configuration (конфигурация)
+	FCDC   FunctionalConstraint = "DC" // Description (описание)
+	FCSG   FunctionalConstraint = "SG" // Setting Group (группа уставок)
+	FCSE   FunctionalConstraint = "SE" // Setting Group Editable (редактируемая группа уставок)
+	FCSR   FunctionalConstraint = "SR" // Service Response (ответ сервиса)
+	FCOR   FunctionalConstraint = "OR" // Operate (операция)
+	FCBL   FunctionalConstraint = "BL" // Blocking (блокировка)
+	FCEX   FunctionalConstraint = "EX" // Extended Definition (расширенное определение)
+	FCCO   FunctionalConstraint = "CO" // Control (управление)
+)
+
 // ReadObject читает объект из сервера IEC 61850 по имени объекта.
 // Это плейсхолдер метод, который будет реализован позже.
 //
@@ -380,8 +401,9 @@ func (c *MmsClient) Initiate(ctx context.Context, opts ...mms.InitiateRequestOpt
 //   - Для объекта типа AnIn1.mag.f значение должно быть типом Float (REAL в MMS)
 //
 // 5. Вернуть строковое представление результата для логирования
-func (c *MmsClient) ReadObject(ctx context.Context, objectName string) (string, error) {
+func (c *MmsClient) ReadObject(ctx context.Context, objectName string, fc FunctionalConstraint) (string, error) {
 	// запрос снятый wireshark
+	// 0300004e02f080010001006141303f020103a03aa038020101a433a131a02f302da02ba1291a1173696d706c65494f47656e65726963494f1a144747494f31244d5824416e496e31246d61672466
 	// TPKT, Version: 3, Length: 78
 	// 0300004e
 	// ISO 8073/X.224 COTP Connection-Oriented Transport Protocol
@@ -402,7 +424,7 @@ func (c *MmsClient) ReadObject(ctx context.Context, objectName string) (string, 
 	// user-data: fully-encoded-data (1)
 	// fully-encoded-data: 1 item
 	// PDV-list
-	// 303а0201
+	// 303f0201
 	// presentation-context-identifier: 3 (mms-abstract-syntax-version1(1))
 	// presentation-data-values: single-ASN1-type (0)
 	// 03a03a
@@ -458,7 +480,174 @@ func (c *MmsClient) ReadObject(ctx context.Context, objectName string) (string, 
 	// success: floating-point (7)
 	// floating-point: 083edf52cc
 
-	// TODO: Реализовать чтение объекта
-	// Пока просто возвращаем сообщение о том, что метод не реализован
-	return fmt.Sprintf("ReadObject not implemented yet. Object: %s", objectName), nil
+	// Проверяем, что соединение установлено
+	if c.cotpConn == nil {
+		return "", fmt.Errorf("connection not established, call Initiate first")
+	}
+
+	// Разбираем objectName на domainID и itemID
+	// Формат: "domain/item" или просто "item"
+	// Пример: "simpleIOGenericIO/GGIO1.AnIn1.mag.f" -> domainID="simpleIOGenericIO", itemID="GGIO1.AnIn1.mag.f"
+	// Или: "GGIO1.AnIn1.mag.f" -> domainID="", itemID="GGIO1.AnIn1.mag.f"
+	// В MMS itemID использует $ вместо . для разделения компонентов
+	var domainID, itemID string
+	if idx := strings.Index(objectName, "/"); idx >= 0 {
+		domainID = objectName[:idx]
+		itemID = objectName[idx+1:]
+	} else {
+		// Если разделителя нет, используем весь objectName как itemID
+		// domainID будет пустым (или можно использовать дефолтный)
+		itemID = objectName
+		// Для примера из wireshark используем "simpleIOGenericIO" как дефолтный domain
+		// В реальности это должно быть настроено или получено из конфигурации
+		if domainID == "" {
+			domainID = "simpleIOGenericIO"
+		}
+	}
+
+	// Преобразуем точки в доллары для itemID с учетом функционального ограничения
+	// Логика согласно MmsMapping_createMmsVariableNameFromObjectReference:
+	// - Первая точка заменяется на $FC$ (например, $MX$)
+	// - Остальные точки заменяются на $
+	// Пример: "GGIO1.AnIn1.mag.f" с FC_MX -> "GGIO1$MX$AnIn1$mag$f"
+	// Если FC не указан, все точки заменяются на $
+	if !strings.Contains(itemID, "$") {
+		if fc != FCNone && fc != "" {
+			// Заменяем первую точку на $FC$
+			if idx := strings.Index(itemID, "."); idx >= 0 {
+				itemID = itemID[:idx] + "$" + string(fc) + "$" + itemID[idx+1:]
+				// Заменяем остальные точки на $
+				itemID = strings.ReplaceAll(itemID, ".", "$")
+			} else {
+				// Если точек нет, добавляем $FC$ в конец
+				itemID = itemID + "$" + string(fc)
+			}
+		} else {
+			// Если FC не указан, просто заменяем все точки на $
+			itemID = strings.ReplaceAll(itemID, ".", "$")
+		}
+	}
+
+	// Создаём MMS Read Request
+	// invokeID = 1 для первого запроса
+	readRequest := mms.NewReadRequest(1, domainID, itemID)
+	mmsPdu := readRequest.Bytes()
+
+	// Логируем MMS PDU
+	c.logger.Debug("MMS Read Request PDU: %x", mmsPdu)
+
+	// Обёртываем в Presentation user-data
+	// contextID = 3 для MMS (mms-abstract-syntax-version1)
+	presentationPdu := presentation.BuildUserData(mmsPdu, 3)
+
+	// Обёртываем в Session: Give tokens PDU + DT SPDU + Presentation PDU
+	// Это соответствует структуре из wireshark: 01 00 01 00 <Presentation PDU>
+	sessionPdu := session.BuildDataTransferWithTokens(presentationPdu)
+
+	// Отправляем через COTP
+	err := c.cotpConn.SendDataMessage(sessionPdu)
+	if err != nil {
+		return "", fmt.Errorf("failed to send Read Request: %w", err)
+	}
+
+	// Получаем ответ
+	for {
+		// Проверяем контекст перед каждой итерацией цикла
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+
+		state, err := c.cotpConn.ReadToTpktBuffer(ctx)
+		if err != nil {
+			return "", fmt.Errorf("failed to read TPKT: %w", err)
+		}
+
+		if state == cotp.TpktError {
+			return "", fmt.Errorf("TPKT read error")
+		}
+
+		if state == cotp.TpktWaiting {
+			continue
+		}
+
+		// state == cotp.TpktPacketComplete
+		indication, err := c.cotpConn.ParseIncomingMessage()
+		if err != nil {
+			return "", fmt.Errorf("failed to parse COTP message: %w", err)
+		}
+
+		if indication == cotp.IndicationMoreFragmentsFollow {
+			// Продолжаем читать фрагменты
+			continue
+		}
+
+		if indication != cotp.IndicationData {
+			return "", fmt.Errorf("unexpected COTP indication: %d", indication)
+		}
+
+		// indication == cotp.IndicationData
+		// Получаем payload из COTP
+		payload := c.cotpConn.GetPayload()
+		// Сбрасываем payload в конце обработки
+		defer c.cotpConn.ResetPayload()
+
+		if len(payload) == 0 {
+			return "", fmt.Errorf("received empty COTP payload")
+		}
+
+		// Выводим ответ в лог в виде байтов
+		c.logger.Debug("Read Response (raw bytes): %x", payload)
+
+		// Парсим Session SPDU
+		sessionPdu, err := session.ParseSessionSPDU(payload)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse Session SPDU: %w", err)
+		}
+		if sessionPdu == nil {
+			return "", fmt.Errorf("session SPDU is nil after parsing")
+		}
+
+		// Логируем результат парсинга
+		c.logger.Debug("  %s", sessionPdu)
+
+		// Парсим Presentation PDU
+		if len(sessionPdu.Data) == 0 {
+			return "", fmt.Errorf("session SPDU data is empty")
+		}
+
+		presentationPdu, err := presentation.ParsePresentationPDU(sessionPdu.Data)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse Presentation PDU: %w", err)
+		}
+		if presentationPdu == nil {
+			return "", fmt.Errorf("presentation PDU is nil after parsing")
+		}
+
+		// Логируем результат парсинга
+		c.logger.Debug("  %s", presentationPdu)
+
+		// Парсим ACSE PDU
+		if len(presentationPdu.Data) == 0 {
+			return "", fmt.Errorf("presentation PDU data is empty")
+		}
+
+		acsePdu, err := acse.ParseACSEPDU(presentationPdu.Data)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse ACSE PDU: %w", err)
+		}
+		if acsePdu == nil {
+			return "", fmt.Errorf("ACSE PDU is nil after parsing")
+		}
+
+		// Логируем результат парсинга
+		c.logger.Debug("  %s", acsePdu)
+
+		// Выводим MMS данные в лог
+		if len(acsePdu.Data) > 0 {
+			c.logger.Debug("MMS Read Response PDU (raw bytes): %x", acsePdu.Data)
+		}
+
+		// Пока просто возвращаем информацию о том, что ответ получен
+		return fmt.Sprintf("Read Response received. Object: %s, Response length: %d bytes", objectName, len(acsePdu.Data)), nil
+	}
 }

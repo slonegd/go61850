@@ -208,6 +208,55 @@ func BuildCPType(userData []byte) []byte {
 	return createConnectPdu(presentation, userData)
 }
 
+// BuildUserData создаёт Presentation user-data для отправки данных после установления соединения.
+// Структура согласно ISO 8823:
+// - fully-encoded-data (Application 1, Constructed) = 0x61
+//   - PDV-list (SEQUENCE) = 0x30
+//     - presentation-context-identifier (INTEGER) = 0x02
+//     - presentation-data-values: single-ASN1-type (0) (Context-specific 0, Constructed) = 0xa0
+//       - MMS PDU (userData)
+// Из wireshark: 61 41 30 3a 02 01 03 a0 3a
+// где:
+// - 61 - fully-encoded-data
+// - 41 - длина (65 байт)
+// - 30 - PDV-list (SEQUENCE)
+// - 3a - длина (58 байт)
+// - 02 01 03 - presentation-context-identifier: 3 (MMS context)
+// - a0 3a - presentation-data-values: single-ASN1-type, длина 58 байт (MMS PDU)
+func BuildUserData(userData []byte, contextID uint8) []byte {
+	// Вычисляем размеры
+	// PDV-list содержит:
+	// - presentation-context-identifier (INTEGER): 1 (tag) + 1 (length) + 1 (value) = 3 байта
+	// - presentation-data-values: 1 (tag) + length_size + userData
+	pdvListLength := 3 + 1 + ber.DetermineLengthSize(uint32(len(userData))) + len(userData)
+	// fully-encoded-data содержит:
+	// - PDV-list: 1 (tag) + length_size + pdvListLength
+	fullyEncodedDataLength := 1 + ber.DetermineLengthSize(uint32(pdvListLength)) + pdvListLength
+
+	buffer := make([]byte, 1+ber.DetermineLengthSize(uint32(fullyEncodedDataLength))+fullyEncodedDataLength)
+	bufPos := 0
+
+	// fully-encoded-data (Application 1, Constructed) = 0x61
+	bufPos = ber.EncodeTL(ber.Application1Constructed, uint32(fullyEncodedDataLength), buffer, bufPos)
+
+	// PDV-list (SEQUENCE) = 0x30
+	bufPos = ber.EncodeTL(ber.SequenceConstructed, uint32(pdvListLength), buffer, bufPos)
+
+	// presentation-context-identifier (INTEGER) = 0x02
+	bufPos = ber.EncodeTL(ber.Integer, 1, buffer, bufPos)
+	buffer[bufPos] = contextID
+	bufPos++
+
+	// presentation-data-values: single-ASN1-type (0) (Context-specific 0, Constructed) = 0xa0
+	bufPos = ber.EncodeTL(ber.ContextSpecific0Constructed, uint32(len(userData)), buffer, bufPos)
+
+	// Копируем userData (MMS PDU)
+	copy(buffer[bufPos:], userData)
+	bufPos += len(userData)
+
+	return buffer[:bufPos]
+}
+
 // PresentationPDUType представляет тип Presentation PDU
 type PresentationPDUType uint8
 
