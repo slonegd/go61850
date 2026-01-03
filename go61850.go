@@ -626,28 +626,83 @@ func (c *MmsClient) ReadObject(ctx context.Context, objectName string, fc Functi
 		// Логируем результат парсинга
 		c.logger.Debug("  %s", presentationPdu)
 
-		// Парсим ACSE PDU
-		if len(presentationPdu.Data) == 0 {
-			return "", fmt.Errorf("presentation PDU data is empty")
+		// Определяем, что содержится в Presentation PDU
+		// После установления соединения данные могут идти напрямую как MMS PDU (contextId = 3)
+		// или через ACSE (contextId = 1)
+		var mmsData []byte
+		if presentationPdu.PresentationContextId == 3 {
+			// MMS context - данные идут напрямую как MMS PDU
+			mmsData = presentationPdu.Data
+			c.logger.Debug("MMS Read Response PDU (raw bytes): %x", mmsData)
+		} else if presentationPdu.PresentationContextId == 1 {
+			// ACSE context - нужно парсить ACSE PDU
+			if len(presentationPdu.Data) == 0 {
+				return "", fmt.Errorf("presentation PDU data is empty")
+			}
+
+			acsePdu, err := acse.ParseACSEPDU(presentationPdu.Data)
+			if err != nil {
+				return "", fmt.Errorf("failed to parse ACSE PDU: %w", err)
+			}
+			if acsePdu == nil {
+				return "", fmt.Errorf("ACSE PDU is nil after parsing")
+			}
+
+			// Логируем результат парсинга
+			c.logger.Debug("  %s", acsePdu)
+
+			// Выводим MMS данные в лог
+			if len(acsePdu.Data) > 0 {
+				c.logger.Debug("MMS Read Response PDU (raw bytes): %x", acsePdu.Data)
+			}
+
+			mmsData = acsePdu.Data
+		} else {
+			return "", fmt.Errorf("unknown presentation context ID: %d", presentationPdu.PresentationContextId)
 		}
 
-		acsePdu, err := acse.ParseACSEPDU(presentationPdu.Data)
+		// Парсим MMS Read Response
+		if len(mmsData) == 0 {
+			return "", fmt.Errorf("MMS data is empty")
+		}
+
+		readResponse, err := mms.ParseReadResponse(mmsData)
 		if err != nil {
-			return "", fmt.Errorf("failed to parse ACSE PDU: %w", err)
+			return "", fmt.Errorf("failed to parse MMS Read Response: %w", err)
 		}
-		if acsePdu == nil {
-			return "", fmt.Errorf("ACSE PDU is nil after parsing")
-		}
-
-		// Логируем результат парсинга
-		c.logger.Debug("  %s", acsePdu)
-
-		// Выводим MMS данные в лог
-		if len(acsePdu.Data) > 0 {
-			c.logger.Debug("MMS Read Response PDU (raw bytes): %x", acsePdu.Data)
+		if readResponse == nil {
+			return "", fmt.Errorf("MMS Read Response is nil after parsing")
 		}
 
-		// Пока просто возвращаем информацию о том, что ответ получен
-		return fmt.Sprintf("Read Response received. Object: %s, Response length: %d bytes", objectName, len(acsePdu.Data)), nil
+		// Извлекаем значение из результатов
+		if len(readResponse.ListOfAccessResult) == 0 {
+			return "", fmt.Errorf("Read Response contains no access results")
+		}
+
+		// Берем первый результат (обычно запрашивается один объект)
+		result := readResponse.ListOfAccessResult[0]
+		if !result.Success {
+			if result.Error != nil {
+				return "", fmt.Errorf("Read failed with error code: %d", result.Error.ErrorCode)
+			}
+			return "", fmt.Errorf("Read failed with unknown error")
+		}
+
+		// Форматируем значение в строковое представление
+		var valueStr string
+		switch v := result.Value.(type) {
+		case float32:
+			valueStr = fmt.Sprintf("%f", v)
+		case int32:
+			valueStr = fmt.Sprintf("%d", v)
+		case bool:
+			valueStr = fmt.Sprintf("%t", v)
+		case string:
+			valueStr = v
+		default:
+			valueStr = fmt.Sprintf("%v", v)
+		}
+
+		return fmt.Sprintf("Object: %s, Value: %s", objectName, valueStr), nil
 	}
 }

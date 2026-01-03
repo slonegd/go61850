@@ -266,11 +266,78 @@ type SessionSPDU struct {
 }
 
 // ParseSessionSPDU парсит Session SPDU из байтового буфера
+// Может содержать несколько SPDU подряд (например, GT SPDU + DT SPDU)
+// Парсит последний DATA SPDU с данными
 func ParseSessionSPDU(data []byte) (*SessionSPDU, error) {
 	if len(data) < 2 {
 		return nil, errors.New("Session SPDU too short: need at least 2 bytes")
 	}
 
+	// Ищем последний DATA SPDU в payload
+	// Может быть несколько SPDU подряд: GT (01 00) + DT (01 00) + данные
+	offset := 0
+	lastDataSPDUOffset := -1
+	
+	for offset < len(data) {
+		if offset+2 > len(data) {
+			break
+		}
+		
+		spduType := SessionSPDUType(data[offset])
+		spduLength := data[offset+1]
+		
+		// Если это DATA SPDU, запоминаем его позицию
+		if spduType == SessionSPDUTypeData {
+			lastDataSPDUOffset = offset
+		}
+		
+		// Переходим к следующему SPDU
+		// Для DATA SPDU с длиной 0, данные идут после SPDU, поэтому ищем следующий SPDU
+		if spduLength == 0 {
+			// Если длина 0, следующий SPDU может идти сразу после (2 байта)
+			offset += 2
+		} else {
+			// Если длина не 0, следующий SPDU идет после Type + Length + Length bytes
+			offset += 2 + int(spduLength)
+		}
+		
+		// Если после DATA SPDU с длиной 0 больше нет SPDU, выходим
+		if spduType == SessionSPDUTypeData && spduLength == 0 && offset >= len(data) {
+			break
+		}
+	}
+	
+	// Если нашли DATA SPDU, парсим его
+	if lastDataSPDUOffset >= 0 {
+		spdu := &SessionSPDU{
+			Type:   SessionSPDUTypeData,
+			Length: data[lastDataSPDUOffset+1],
+		}
+		
+		// Для DATA SPDU с длиной 0, данные идут сразу после SPDU
+		if spdu.Length == 0 {
+			dataStart := lastDataSPDUOffset + 2
+			if dataStart < len(data) {
+				spdu.Data = make([]byte, len(data)-dataStart)
+				copy(spdu.Data, data[dataStart:])
+			} else {
+				spdu.Data = []byte{}
+			}
+		} else {
+			// Если длина не 0, данные включены в длину
+			dataStart := lastDataSPDUOffset + 2
+			dataLength := int(spdu.Length)
+			if dataStart+dataLength <= len(data) {
+				spdu.Data = make([]byte, dataLength)
+				copy(spdu.Data, data[dataStart:dataStart+dataLength])
+			} else {
+				spdu.Data = []byte{}
+			}
+		}
+		return spdu, nil
+	}
+	
+	// Если DATA SPDU не найден, парсим первый SPDU как обычно
 	spdu := &SessionSPDU{
 		Type:   SessionSPDUType(data[0]),
 		Length: data[1],
@@ -286,8 +353,8 @@ func ParseSessionSPDU(data []byte) (*SessionSPDU, error) {
 		return nil, fmt.Errorf("Session SPDU incomplete: need %d bytes, got %d", spduTotalLength, len(data))
 	}
 
-	// Парсим параметры
-	offset := 2 // Начинаем после Type и Length
+	// Для других типов SPDU парсим параметры
+	offset = 2 // Начинаем после Type и Length
 	userDataStart := -1
 	userDataLength := 0
 
