@@ -354,3 +354,111 @@ func (c *MmsClient) Initiate(ctx context.Context, opts ...mms.InitiateRequestOpt
 		return mmsResponse, nil
 	}
 }
+
+// ReadObject читает объект из сервера IEC 61850 по имени объекта.
+// Это плейсхолдер метод, который будет реализован позже.
+//
+// TODO: Реализовать метод чтения объекта:
+// 1. После успешного Initiate необходимо отправить MMS Read Request PDU
+// 2. В Read Request нужно создать VariableAccessSpecification:
+//   - Разобрать строку objectName (например, "simpleIOGenericIO/GGIO1.AnIn1.mag.f") на компоненты:
+//   - domainName: "simpleIOGenericIO"
+//   - variableName: "GGIO1.AnIn1.mag.f" (может быть иерархической структурой)
+//   - Создать ObjectName из domainName и itemName (имя переменной)
+//   - VariableAccessSpecification должен содержать listOfVariable (CHOICE) с ObjectName
+//
+// 3. Отправить Read Request через MMS клиент:
+//   - Использовать существующее COTP соединение (c.cotpConn), которое создаётся в Initiate
+//   - Закодировать Read Request в BER
+//   - Отправить через Session/Presentation/ACSE слои (аналогично Initiate)
+//
+// 4. Получить и распарсить Read Response:
+//   - Прочитать ответ от сервера через c.cotpConn.ReadToTpktBuffer(ctx)
+//   - Распарсить COTP -> Session -> Presentation -> ACSE -> MMS
+//   - Распарсить BER кодировку Read Response PDU
+//   - Извлечь значение из listOfAccessResult
+//   - Для объекта типа AnIn1.mag.f значение должно быть типом Float (REAL в MMS)
+//
+// 5. Вернуть строковое представление результата для логирования
+func (c *MmsClient) ReadObject(ctx context.Context, objectName string) (string, error) {
+	// запрос снятый wireshark
+	// TPKT, Version: 3, Length: 78
+	// 0300004e
+	// ISO 8073/X.224 COTP Connection-Oriented Transport Protocol
+	// Length: 2, PDU Type: DT Data (0x0f)
+	// [Destination reference: 0x20000]
+	// .000 0000 = TPDU number: 0x00
+	// 1... .... = Last data unit: Yes
+	// 02f080
+	// ISO 8327-1 OSI Session Protocol
+	// SPDU Type: Give tokens PDU (1), Length: 0
+	// 0100
+	// ISO 8327-1 OSI Session Protocol
+	// SPDU Type: DATA TRANSFER (DT) SPDU (1)
+	// Length: 0
+	// 0100
+	// ISO 8823 OSI Presentation Protocol
+	// 6141
+	// user-data: fully-encoded-data (1)
+	// fully-encoded-data: 1 item
+	// PDV-list
+	// 303а0201
+	// presentation-context-identifier: 3 (mms-abstract-syntax-version1(1))
+	// presentation-data-values: single-ASN1-type (0)
+	// 03a03a
+	// MMS confirmed-RequestPDU
+	// a038
+	// invokeID: 1
+	// 020101
+	// confirmedServiceRequest: read (4)
+	// a433a131a02f
+	// variableAccessSpecificatn: listOfVariable (0)
+	// listOfVariable: 1 item
+	// listOfVariable item
+	// 302da02b
+	// variableSpecification: name (0)
+	// a129
+	// name: domain-specific (1)
+	// 1a11
+	// domainId: simpleIOGenericIO
+	// 1a14
+	// itemId: GGIO1$MX$AnIn1$mag$f
+
+	// ответ снятый wireshark
+	// TPKT, Version: 3, Length: 36
+	// 03000024
+	// ISO 8073/X.224 COTP Connection-Oriented Transport Protocol
+	// 02f080
+	// ISO 8327-1 OSI Session Protocol: SPDU Type: Give tokens PDU (1), Length: 0
+	// 0100
+	// ISO 8327-1 OSI Session Protocol: SPDU Type: DATA TRANSFER (DT) SPDU (1), Length: 0
+	// 0100
+	// ISO 8823 OSI Presentation Protocol
+	// 6117
+	// user-data: fully-encoded-data (1)
+	// fully-encoded-data: 1 item
+	// PDV-list
+	// 30150201
+	// presentation-context-identifier: 3 (mms-abstract-syntax-version1(1))
+	// 03
+	// presentation-data-values: single-ASN1-type (0)
+	// 0a10
+	// MMS
+	// a10e
+	// confirmed-ResponsePDU
+	// invokeID: 1
+	// 020101
+	// confirmedServiceResponse: read (4)
+	// a409
+	// read
+	// a107
+	// listOfAccessResult: 1 item
+	// AccessResult: success (1)
+	// 8705
+	// success: floating-point (7)
+	// floating-point: 083edf52cc
+
+	// TODO: Реализовать чтение объекта
+	// Пока просто возвращаем сообщение о том, что метод не реализован
+	return fmt.Sprintf("ReadObject not implemented yet. Object: %s", objectName), nil
+}

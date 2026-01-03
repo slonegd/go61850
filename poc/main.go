@@ -209,7 +209,7 @@ import (
 )
 
 // proofOfConcept выполняет Proof of Concept: устанавливает COTP соединение,
-// отправляет MMS Initiate Request и получает ответ.
+// отправляет MMS Initiate Request и получает ответ, затем читает объект.
 func proofOfConcept(conn net.Conn, l logger.Logger) error {
 	opts := []go61850.MmsClientOption{}
 	if l != nil {
@@ -228,6 +228,20 @@ func proofOfConcept(conn net.Conn, l logger.Logger) error {
 		l.Debug("MMS InitiateResponse: %s", response)
 	} else {
 		log.Printf("MMS InitiateResponse: %s", response)
+	}
+
+	// Читаем объект из сервера
+	objectName := "simpleIOGenericIO/GGIO1.AnIn1.mag.f"
+	readResult, err := client.ReadObject(ctx, objectName)
+	if err != nil {
+		return err
+	}
+
+	// Выводим результат чтения в лог
+	if l != nil {
+		l.Debug("ReadObject result: %s", readResult)
+	} else {
+		log.Printf("ReadObject result: %s", readResult)
 	}
 
 	return nil
