@@ -59,9 +59,80 @@ type AccessResult struct {
 	Error   *DataAccessError
 }
 
+// DataAccessErrorCode представляет код ошибки доступа к данным MMS
+// Значения согласно ISO/IEC 9506-2 (MMS) и ASN.1 определению DataAccessError
+type DataAccessErrorCode uint32
+
+const (
+	// ObjectInvalidated объект был инвалидирован
+	ObjectInvalidated DataAccessErrorCode = 0
+	// HardwareFault ошибка оборудования
+	HardwareFault DataAccessErrorCode = 1
+	// TemporarilyUnavailable объект временно недоступен
+	TemporarilyUnavailable DataAccessErrorCode = 2
+	// ObjectAccessDenied доступ к объекту запрещен
+	ObjectAccessDenied DataAccessErrorCode = 3
+	// ObjectUndefined объект не определен
+	ObjectUndefined DataAccessErrorCode = 4
+	// InvalidAddress неверный адрес
+	InvalidAddress DataAccessErrorCode = 5
+	// TypeUnsupported тип не поддерживается
+	TypeUnsupported DataAccessErrorCode = 6
+	// TypeInconsistent тип не согласован
+	TypeInconsistent DataAccessErrorCode = 7
+	// ObjectAttributeInconsistent атрибуты объекта не согласованы
+	ObjectAttributeInconsistent DataAccessErrorCode = 8
+	// ObjectAccessUnsupported доступ к объекту не поддерживается
+	ObjectAccessUnsupported DataAccessErrorCode = 9
+	// ObjectNonExistent объект не существует
+	ObjectNonExistent DataAccessErrorCode = 10
+	// ObjectValueInvalid значение объекта неверно
+	ObjectValueInvalid DataAccessErrorCode = 11
+)
+
+// String возвращает строковое представление кода ошибки
+func (c DataAccessErrorCode) String() string {
+	switch c {
+	case ObjectInvalidated:
+		return "object-invalidated"
+	case HardwareFault:
+		return "hardware-fault"
+	case TemporarilyUnavailable:
+		return "temporarily-unavailable"
+	case ObjectAccessDenied:
+		return "object-access-denied"
+	case ObjectUndefined:
+		return "object-undefined"
+	case InvalidAddress:
+		return "invalid-address"
+	case TypeUnsupported:
+		return "type-unsupported"
+	case TypeInconsistent:
+		return "type-inconsistent"
+	case ObjectAttributeInconsistent:
+		return "object-attribute-inconsistent"
+	case ObjectAccessUnsupported:
+		return "object-access-unsupported"
+	case ObjectNonExistent:
+		return "object-non-existent"
+	case ObjectValueInvalid:
+		return "object-value-invalid"
+	default:
+		return fmt.Sprintf("unknown-error-code-%d", c)
+	}
+}
+
 // DataAccessError представляет ошибку доступа к данным
 type DataAccessError struct {
-	ErrorCode uint32
+	ErrorCode DataAccessErrorCode
+}
+
+// String возвращает строковое представление ошибки доступа к данным
+func (e *DataAccessError) String() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return e.ErrorCode.String()
 }
 
 // ParseReadResponse парсит MMS Read Response PDU из BER-кодированного буфера
@@ -81,9 +152,10 @@ type DataAccessError struct {
 //	a4 09 - confirmedServiceResponse: read
 //	   a1 07 - read
 //	      87 05 - success
-func ParseReadResponse(buffer []byte) (*ReadResponse, error) {
+func ParseReadResponse(buffer []byte) (ReadResponse, error) {
+	var response ReadResponse
 	if len(buffer) == 0 {
-		return nil, errors.New("empty buffer")
+		return response, errors.New("empty buffer")
 	}
 
 	// Проверяем формат данных
@@ -102,13 +174,13 @@ func ParseReadResponse(buffer []byte) (*ReadResponse, error) {
 		// Декодируем длину
 		newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode length: %w", err)
+			return response, fmt.Errorf("failed to decode length: %w", err)
 		}
 		bufPos = newPos
 
 		// Проверяем, что длина соответствует размеру буфера
 		if bufPos+length > maxBufPos {
-			return nil, errors.New("invalid length: exceeds buffer size")
+			return response, errors.New("invalid length: exceeds buffer size")
 		}
 
 		maxBufPos = bufPos + length
@@ -121,13 +193,13 @@ func ParseReadResponse(buffer []byte) (*ReadResponse, error) {
 		// Декодируем длину
 		newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode length: %w", err)
+			return response, fmt.Errorf("failed to decode length: %w", err)
 		}
 		bufPos = newPos
 
 		// Проверяем, что длина соответствует размеру буфера
 		if bufPos+length > maxBufPos {
-			return nil, errors.New("invalid length: exceeds buffer size")
+			return response, errors.New("invalid length: exceeds buffer size")
 		}
 
 		maxBufPos = bufPos + length
@@ -137,8 +209,6 @@ func ParseReadResponse(buffer []byte) (*ReadResponse, error) {
 		maxBufPos = len(buffer)
 	}
 
-	response := &ReadResponse{}
-
 	// Парсим поля confirmed-ResponsePDU
 	for bufPos < maxBufPos {
 		tag := buffer[bufPos]
@@ -146,12 +216,12 @@ func ParseReadResponse(buffer []byte) (*ReadResponse, error) {
 
 		newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode length for tag 0x%02x: %w", tag, err)
+			return response, fmt.Errorf("failed to decode length for tag 0x%02x: %w", tag, err)
 		}
 		bufPos = newPos
 
 		if bufPos+length > maxBufPos {
-			return nil, fmt.Errorf("invalid length for tag 0x%02x: exceeds buffer size", tag)
+			return response, fmt.Errorf("invalid length for tag 0x%02x: exceeds buffer size", tag)
 		}
 
 		switch tag {
@@ -163,76 +233,7 @@ func ParseReadResponse(buffer []byte) (*ReadResponse, error) {
 			// Парсим read response
 			readResponse, err := parseReadServiceResponse(buffer[bufPos:bufPos+length], length)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse read service response: %w", err)
-			}
-			response.ListOfAccessResult = readResponse
-			bufPos += length
-
-		default:
-			// Пропускаем неизвестные теги
-			bufPos += length
-		}
-	}
-
-	return response, nil
-}
-
-// parseReadResponseWithoutWrapper парсит read response без обертки confirmed-ResponsePDU
-// Структура: a1 (read) + length + invokeID + confirmedServiceResponse
-func parseReadResponseWithoutWrapper(buffer []byte) (*ReadResponse, error) {
-	if len(buffer) < 1 {
-		return nil, errors.New("empty buffer")
-	}
-
-	// Проверяем, что это read (tag 0xA1)
-	if buffer[0] != 0xA1 {
-		return nil, fmt.Errorf("invalid tag: expected 0xA1 (read), got 0x%02x", buffer[0])
-	}
-
-	response := &ReadResponse{}
-
-	bufPos := 1
-	maxBufPos := len(buffer)
-
-	// Декодируем длину
-	newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode length: %w", err)
-	}
-	bufPos = newPos
-
-	// Проверяем, что длина соответствует размеру буфера
-	if bufPos+length > maxBufPos {
-		return nil, errors.New("invalid length: exceeds buffer size")
-	}
-
-	maxBufPos = bufPos + length
-
-	// Парсим поля read response
-	for bufPos < maxBufPos {
-		tag := buffer[bufPos]
-		bufPos++
-
-		newPos, length, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode length for tag 0x%02x: %w", tag, err)
-		}
-		bufPos = newPos
-
-		if bufPos+length > maxBufPos {
-			return nil, fmt.Errorf("invalid length for tag 0x%02x: exceeds buffer size", tag)
-		}
-
-		switch tag {
-		case 0x02: // invokeID (INTEGER)
-			response.InvokeID = ber.DecodeUint32(buffer, length, bufPos)
-			bufPos += length
-
-		case 0xA4: // confirmedServiceResponse: read (Context-specific 4, Constructed)
-			// Парсим read response
-			readResponse, err := parseReadServiceResponse(buffer[bufPos:bufPos+length], length)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse read service response: %w", err)
+				return response, fmt.Errorf("failed to parse read service response: %w", err)
 			}
 			response.ListOfAccessResult = readResponse
 			bufPos += length
@@ -332,6 +333,17 @@ func parseReadServiceResponse(buffer []byte, maxLength int) ([]AccessResult, err
 			})
 			bufPos += length
 
+		case 0x80: // failure (Context-specific 0) - DataAccessError
+			// Парсим ошибку доступа к данным
+			errorCode := DataAccessErrorCode(ber.DecodeUint32(buffer, length, bufPos))
+			results = append(results, AccessResult{
+				Success: false,
+				Error: &DataAccessError{
+					ErrorCode: errorCode,
+				},
+			})
+			bufPos += length
+
 		default:
 			// Пропускаем неизвестные теги
 			bufPos += length
@@ -391,7 +403,7 @@ func parseListOfAccessResult(buffer []byte, maxLength int) ([]AccessResult, erro
 
 		case 0x80: // failure (Context-specific 0) - DataAccessError
 			// Парсим ошибку
-			errorCode := ber.DecodeUint32(buffer, length, bufPos)
+			errorCode := DataAccessErrorCode(ber.DecodeUint32(buffer, length, bufPos))
 			results = append(results, AccessResult{
 				Success: false,
 				Error: &DataAccessError{
@@ -472,7 +484,11 @@ func (r *ReadResponse) String() string {
 				}
 			}
 		} else {
-			results = append(results, fmt.Sprintf("Result[%d]: Error(code=%d)", i, result.Error.ErrorCode))
+			if result.Error != nil {
+				results = append(results, fmt.Sprintf("Result[%d]: Error(%s)", i, result.Error.ErrorCode))
+			} else {
+				results = append(results, fmt.Sprintf("Result[%d]: Error(<nil>)", i))
+			}
 		}
 	}
 

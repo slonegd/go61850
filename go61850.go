@@ -380,10 +380,11 @@ func (c *MmsClient) Initiate(ctx context.Context, opts ...mms.InitiateRequestOpt
 //   - Для объекта типа AnIn1.mag.f значение должно быть типом Float (REAL в MMS)
 //
 // 5. Вернуть AccessResult с результатом чтения
-func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest) (*mms.AccessResult, error) {
+func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest) (mms.AccessResult, error) {
+	var result mms.AccessResult
 	// Проверяем, что соединение установлено
 	if c.cotpConn == nil {
-		return nil, fmt.Errorf("connection not established, call Initiate first")
+		return result, fmt.Errorf("connection not established, call Initiate first")
 	}
 	mmsPdu := readRequest.Bytes()
 
@@ -401,23 +402,23 @@ func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest
 	// Отправляем через COTP
 	err := c.cotpConn.SendDataMessage(sessionPdu)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send Read Request: %w", err)
+		return result, fmt.Errorf("failed to send Read Request: %w", err)
 	}
 
 	// Получаем ответ
 	for {
 		// Проверяем контекст перед каждой итерацией цикла
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return result, ctx.Err()
 		}
 
 		state, err := c.cotpConn.ReadToTpktBuffer(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read TPKT: %w", err)
+			return result, fmt.Errorf("failed to read TPKT: %w", err)
 		}
 
 		if state == cotp.TpktError {
-			return nil, fmt.Errorf("TPKT read error")
+			return result, fmt.Errorf("TPKT read error")
 		}
 
 		if state == cotp.TpktWaiting {
@@ -427,7 +428,7 @@ func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest
 		// state == cotp.TpktPacketComplete
 		indication, err := c.cotpConn.ParseIncomingMessage()
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse COTP message: %w", err)
+			return result, fmt.Errorf("failed to parse COTP message: %w", err)
 		}
 
 		if indication == cotp.IndicationMoreFragmentsFollow {
@@ -436,7 +437,7 @@ func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest
 		}
 
 		if indication != cotp.IndicationData {
-			return nil, fmt.Errorf("unexpected COTP indication: %d", indication)
+			return result, fmt.Errorf("unexpected COTP indication: %d", indication)
 		}
 
 		// indication == cotp.IndicationData
@@ -446,7 +447,7 @@ func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest
 		defer c.cotpConn.ResetPayload()
 
 		if len(payload) == 0 {
-			return nil, fmt.Errorf("received empty COTP payload")
+			return result, fmt.Errorf("received empty COTP payload")
 		}
 
 		// Выводим ответ в лог в виде байтов
@@ -455,10 +456,10 @@ func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest
 		// Парсим Session SPDU
 		sessionPdu, err := session.ParseSessionSPDU(payload)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse Session SPDU: %w", err)
+			return result, fmt.Errorf("failed to parse Session SPDU: %w", err)
 		}
 		if sessionPdu == nil {
-			return nil, fmt.Errorf("session SPDU is nil after parsing")
+			return result, fmt.Errorf("session SPDU is nil after parsing")
 		}
 
 		// Логируем результат парсинга
@@ -466,15 +467,15 @@ func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest
 
 		// Парсим Presentation PDU
 		if len(sessionPdu.Data) == 0 {
-			return nil, fmt.Errorf("session SPDU data is empty")
+			return result, fmt.Errorf("session SPDU data is empty")
 		}
 
 		presentationPdu, err := presentation.ParsePresentationPDU(sessionPdu.Data)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse Presentation PDU: %w", err)
+			return result, fmt.Errorf("failed to parse Presentation PDU: %w", err)
 		}
 		if presentationPdu == nil {
-			return nil, fmt.Errorf("presentation PDU is nil after parsing")
+			return result, fmt.Errorf("presentation PDU is nil after parsing")
 		}
 
 		// Логируем результат парсинга
@@ -491,15 +492,15 @@ func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest
 		} else if presentationPdu.PresentationContextId == 1 {
 			// ACSE context - нужно парсить ACSE PDU
 			if len(presentationPdu.Data) == 0 {
-				return nil, fmt.Errorf("presentation PDU data is empty")
+				return result, fmt.Errorf("presentation PDU data is empty")
 			}
 
 			acsePdu, err := acse.ParseACSEPDU(presentationPdu.Data)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse ACSE PDU: %w", err)
+				return result, fmt.Errorf("failed to parse ACSE PDU: %w", err)
 			}
 			if acsePdu == nil {
-				return nil, fmt.Errorf("ACSE PDU is nil after parsing")
+				return result, fmt.Errorf("ACSE PDU is nil after parsing")
 			}
 
 			// Логируем результат парсинга
@@ -512,31 +513,25 @@ func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest
 
 			mmsData = acsePdu.Data
 		} else {
-			return nil, fmt.Errorf("unknown presentation context ID: %d", presentationPdu.PresentationContextId)
+			return result, fmt.Errorf("unknown presentation context ID: %d", presentationPdu.PresentationContextId)
 		}
 
 		// Парсим MMS Read Response
 		if len(mmsData) == 0 {
-			return nil, fmt.Errorf("MMS data is empty")
+			return result, fmt.Errorf("MMS data is empty")
 		}
 
 		readResponse, err := mms.ParseReadResponse(mmsData)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse MMS Read Response: %w", err)
-		}
-		if readResponse == nil {
-			return nil, fmt.Errorf("MMS Read Response is nil after parsing")
+			return result, fmt.Errorf("failed to parse MMS Read Response: %w", err)
 		}
 
 		// Извлекаем значение из результатов
 		if len(readResponse.ListOfAccessResult) == 0 {
-			return nil, fmt.Errorf("Read Response contains no access results")
+			return result, fmt.Errorf("Read Response contains no access results")
 		}
 
 		// Берем первый результат (обычно запрашивается один объект)
-		result := readResponse.ListOfAccessResult[0]
-
-		// Возвращаем результат (даже если это ошибка, возвращаем сам AccessResult)
-		return &result, nil
+		return readResponse.ListOfAccessResult[0], nil
 	}
 }
