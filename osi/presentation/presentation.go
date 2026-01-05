@@ -208,6 +208,55 @@ func BuildCPType(userData []byte) []byte {
 	return createConnectPdu(presentation, userData)
 }
 
+// BuildUserData создаёт Presentation user-data для отправки данных после установления соединения.
+// Структура согласно ISO 8823:
+// - fully-encoded-data (Application 1, Constructed) = 0x61
+//   - PDV-list (SEQUENCE) = 0x30
+//     - presentation-context-identifier (INTEGER) = 0x02
+//     - presentation-data-values: single-ASN1-type (0) (Context-specific 0, Constructed) = 0xa0
+//       - MMS PDU (userData)
+// Из wireshark: 61 41 30 3a 02 01 03 a0 3a
+// где:
+// - 61 - fully-encoded-data
+// - 41 - длина (65 байт)
+// - 30 - PDV-list (SEQUENCE)
+// - 3a - длина (58 байт)
+// - 02 01 03 - presentation-context-identifier: 3 (MMS context)
+// - a0 3a - presentation-data-values: single-ASN1-type, длина 58 байт (MMS PDU)
+func BuildUserData(userData []byte, contextID uint8) []byte {
+	// Вычисляем размеры
+	// PDV-list содержит:
+	// - presentation-context-identifier (INTEGER): 1 (tag) + 1 (length) + 1 (value) = 3 байта
+	// - presentation-data-values: 1 (tag) + length_size + userData
+	pdvListLength := 3 + 1 + ber.DetermineLengthSize(uint32(len(userData))) + len(userData)
+	// fully-encoded-data содержит:
+	// - PDV-list: 1 (tag) + length_size + pdvListLength
+	fullyEncodedDataLength := 1 + ber.DetermineLengthSize(uint32(pdvListLength)) + pdvListLength
+
+	buffer := make([]byte, 1+ber.DetermineLengthSize(uint32(fullyEncodedDataLength))+fullyEncodedDataLength)
+	bufPos := 0
+
+	// fully-encoded-data (Application 1, Constructed) = 0x61
+	bufPos = ber.EncodeTL(ber.Application1Constructed, uint32(fullyEncodedDataLength), buffer, bufPos)
+
+	// PDV-list (SEQUENCE) = 0x30
+	bufPos = ber.EncodeTL(ber.SequenceConstructed, uint32(pdvListLength), buffer, bufPos)
+
+	// presentation-context-identifier (INTEGER) = 0x02
+	bufPos = ber.EncodeTL(ber.Integer, 1, buffer, bufPos)
+	buffer[bufPos] = contextID
+	bufPos++
+
+	// presentation-data-values: single-ASN1-type (0) (Context-specific 0, Constructed) = 0xa0
+	bufPos = ber.EncodeTL(ber.ContextSpecific0Constructed, uint32(len(userData)), buffer, bufPos)
+
+	// Копируем userData (MMS PDU)
+	copy(buffer[bufPos:], userData)
+	bufPos += len(userData)
+
+	return buffer[:bufPos]
+}
+
 // PresentationPDUType представляет тип Presentation PDU
 type PresentationPDUType uint8
 
@@ -305,6 +354,53 @@ func parseFullyEncodedData(buffer []byte, bufPos, maxBufPos int) (newPos int, co
 	}
 
 	return bufPos, contextId, dataValuesType, data, nil
+}
+
+// parseUserDataPDU парсит user-data PDU (Application 1, Constructed = 0x61)
+// Структура: 61 (tag) + length + fully-encoded-data
+// fully-encoded-data содержит PDV-list с presentation-context-identifier и presentation-data-values
+func parseUserDataPDU(data []byte) (*PresentationPDU, error) {
+	if len(data) < 1 {
+		return nil, errors.New("user-data PDU too short")
+	}
+
+	// Проверяем, что это user-data (Application 1, Constructed = 0x61)
+	if data[0] != 0x61 {
+		return nil, fmt.Errorf("invalid user-data tag: expected 0x61, got 0x%02x", data[0])
+	}
+
+	pdu := &PresentationPDU{
+		Type: PresentationPDUType(0x61), // User-data
+	}
+
+	bufPos := 1
+	maxBufPos := len(data)
+
+	// Декодируем длину fully-encoded-data
+	newPos, _, err := ber.DecodeLength(data, bufPos, maxBufPos)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode user-data length: %w", err)
+	}
+	bufPos = newPos
+
+	// Парсим fully-encoded-data (PDV-list)
+	newPos, contextId, dataValuesType, userData, err := parseFullyEncodedData(data, bufPos, maxBufPos)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse fully-encoded-data: %w", err)
+	}
+
+	pdu.PresentationContextId = contextId
+	pdu.PresentationDataValuesType = dataValuesType
+	pdu.Data = userData
+
+	// Определяем, какой это context (ACSE или MMS)
+	if contextId == 1 {
+		pdu.AcseContextId = contextId
+	} else if contextId == 3 {
+		pdu.MmsContextId = contextId
+	}
+
+	return pdu, nil
 }
 
 // parseNormalModeParameters парсит normal-mode-parameters согласно parseNormalModeParameters из C библиотеки (строки 414-543)
@@ -467,12 +563,19 @@ func parseNormalModeParameters(buffer []byte, bufPos, maxBufPos int) (newPos int
 
 // ParsePresentationPDU парсит Presentation PDU из байтового буфера
 // Реализация основана на IsoPresentation_parseAcceptMessage из C библиотеки (строки 545-612)
+// Может парсить как CP/CPA сообщения (tag 0x31), так и user-data сообщения (tag 0x61)
 func ParsePresentationPDU(data []byte) (*PresentationPDU, error) {
 	if len(data) < 1 {
 		return nil, errors.New("Presentation PDU too short: need at least 1 byte")
 	}
 
 	cpTag := data[0]
+	
+	// Если это user-data (Application 1, Constructed = 0x61), парсим его напрямую
+	if cpTag == 0x61 {
+		return parseUserDataPDU(data)
+	}
+	
 	if cpTag != 0x31 {
 		return nil, fmt.Errorf("not a CP/CPA message: expected 0x31, got 0x%02x", cpTag)
 	}

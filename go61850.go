@@ -354,3 +354,189 @@ func (c *MmsClient) Initiate(ctx context.Context, opts ...mms.InitiateRequestOpt
 		return mmsResponse, nil
 	}
 }
+
+// ReadObject читает объект из сервера IEC 61850 по имени объекта.
+// Это плейсхолдер метод, который будет реализован позже.
+//
+// TODO: Реализовать метод чтения объекта:
+// 1. После успешного Initiate необходимо отправить MMS Read Request PDU
+// 2. В Read Request нужно создать VariableAccessSpecification:
+//   - Разобрать строку objectName (например, "simpleIOGenericIO/GGIO1.AnIn1.mag.f") на компоненты:
+//   - domainName: "simpleIOGenericIO"
+//   - variableName: "GGIO1.AnIn1.mag.f" (может быть иерархической структурой)
+//   - Создать ObjectName из domainName и itemName (имя переменной)
+//   - VariableAccessSpecification должен содержать listOfVariable (CHOICE) с ObjectName
+//
+// 3. Отправить Read Request через MMS клиент:
+//   - Использовать существующее COTP соединение (c.cotpConn), которое создаётся в Initiate
+//   - Закодировать Read Request в BER
+//   - Отправить через Session/Presentation/ACSE слои (аналогично Initiate)
+//
+// 4. Получить и распарсить Read Response:
+//   - Прочитать ответ от сервера через c.cotpConn.ReadToTpktBuffer(ctx)
+//   - Распарсить COTP -> Session -> Presentation -> ACSE -> MMS
+//   - Распарсить BER кодировку Read Response PDU
+//   - Извлечь значение из listOfAccessResult
+//   - Для объекта типа AnIn1.mag.f значение должно быть типом Float (REAL в MMS)
+//
+// 5. Вернуть AccessResult с результатом чтения
+func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest) (*mms.AccessResult, error) {
+	// Проверяем, что соединение установлено
+	if c.cotpConn == nil {
+		return nil, fmt.Errorf("connection not established, call Initiate first")
+	}
+	mmsPdu := readRequest.Bytes()
+
+	// Логируем MMS PDU
+	c.logger.Debug("MMS Read Request PDU: %x", mmsPdu)
+
+	// Обёртываем в Presentation user-data
+	// contextID = 3 для MMS (mms-abstract-syntax-version1)
+	presentationPdu := presentation.BuildUserData(mmsPdu, 3)
+
+	// Обёртываем в Session: Give tokens PDU + DT SPDU + Presentation PDU
+	// Это соответствует структуре из wireshark: 01 00 01 00 <Presentation PDU>
+	sessionPdu := session.BuildDataTransferWithTokens(presentationPdu)
+
+	// Отправляем через COTP
+	err := c.cotpConn.SendDataMessage(sessionPdu)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send Read Request: %w", err)
+	}
+
+	// Получаем ответ
+	for {
+		// Проверяем контекст перед каждой итерацией цикла
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		state, err := c.cotpConn.ReadToTpktBuffer(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read TPKT: %w", err)
+		}
+
+		if state == cotp.TpktError {
+			return nil, fmt.Errorf("TPKT read error")
+		}
+
+		if state == cotp.TpktWaiting {
+			continue
+		}
+
+		// state == cotp.TpktPacketComplete
+		indication, err := c.cotpConn.ParseIncomingMessage()
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse COTP message: %w", err)
+		}
+
+		if indication == cotp.IndicationMoreFragmentsFollow {
+			// Продолжаем читать фрагменты
+			continue
+		}
+
+		if indication != cotp.IndicationData {
+			return nil, fmt.Errorf("unexpected COTP indication: %d", indication)
+		}
+
+		// indication == cotp.IndicationData
+		// Получаем payload из COTP
+		payload := c.cotpConn.GetPayload()
+		// Сбрасываем payload в конце обработки
+		defer c.cotpConn.ResetPayload()
+
+		if len(payload) == 0 {
+			return nil, fmt.Errorf("received empty COTP payload")
+		}
+
+		// Выводим ответ в лог в виде байтов
+		c.logger.Debug("Read Response (raw bytes): %x", payload)
+
+		// Парсим Session SPDU
+		sessionPdu, err := session.ParseSessionSPDU(payload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse Session SPDU: %w", err)
+		}
+		if sessionPdu == nil {
+			return nil, fmt.Errorf("session SPDU is nil after parsing")
+		}
+
+		// Логируем результат парсинга
+		c.logger.Debug("  %s", sessionPdu)
+
+		// Парсим Presentation PDU
+		if len(sessionPdu.Data) == 0 {
+			return nil, fmt.Errorf("session SPDU data is empty")
+		}
+
+		presentationPdu, err := presentation.ParsePresentationPDU(sessionPdu.Data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse Presentation PDU: %w", err)
+		}
+		if presentationPdu == nil {
+			return nil, fmt.Errorf("presentation PDU is nil after parsing")
+		}
+
+		// Логируем результат парсинга
+		c.logger.Debug("  %s", presentationPdu)
+
+		// Определяем, что содержится в Presentation PDU
+		// После установления соединения данные могут идти напрямую как MMS PDU (contextId = 3)
+		// или через ACSE (contextId = 1)
+		var mmsData []byte
+		if presentationPdu.PresentationContextId == 3 {
+			// MMS context - данные идут напрямую как MMS PDU
+			mmsData = presentationPdu.Data
+			c.logger.Debug("MMS Read Response PDU (raw bytes): %x", mmsData)
+		} else if presentationPdu.PresentationContextId == 1 {
+			// ACSE context - нужно парсить ACSE PDU
+			if len(presentationPdu.Data) == 0 {
+				return nil, fmt.Errorf("presentation PDU data is empty")
+			}
+
+			acsePdu, err := acse.ParseACSEPDU(presentationPdu.Data)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse ACSE PDU: %w", err)
+			}
+			if acsePdu == nil {
+				return nil, fmt.Errorf("ACSE PDU is nil after parsing")
+			}
+
+			// Логируем результат парсинга
+			c.logger.Debug("  %s", acsePdu)
+
+			// Выводим MMS данные в лог
+			if len(acsePdu.Data) > 0 {
+				c.logger.Debug("MMS Read Response PDU (raw bytes): %x", acsePdu.Data)
+			}
+
+			mmsData = acsePdu.Data
+		} else {
+			return nil, fmt.Errorf("unknown presentation context ID: %d", presentationPdu.PresentationContextId)
+		}
+
+		// Парсим MMS Read Response
+		if len(mmsData) == 0 {
+			return nil, fmt.Errorf("MMS data is empty")
+		}
+
+		readResponse, err := mms.ParseReadResponse(mmsData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse MMS Read Response: %w", err)
+		}
+		if readResponse == nil {
+			return nil, fmt.Errorf("MMS Read Response is nil after parsing")
+		}
+
+		// Извлекаем значение из результатов
+		if len(readResponse.ListOfAccessResult) == 0 {
+			return nil, fmt.Errorf("Read Response contains no access results")
+		}
+
+		// Берем первый результат (обычно запрашивается один объект)
+		result := readResponse.ListOfAccessResult[0]
+
+		// Возвращаем результат (даже если это ошибка, возвращаем сам AccessResult)
+		return &result, nil
+	}
+}

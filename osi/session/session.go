@@ -187,6 +187,60 @@ func buildConnectSPDUWithSession(session *Session, userData []byte) []byte {
 	return buf[:offset]
 }
 
+// BuildGiveTokensSPDU создаёт Give tokens PDU (GT SPDU) для передачи токенов.
+// Структура согласно ISO 8327-1:
+// - SPDU Type: 1 (GT)
+// - Length: 0 (нет параметров)
+// Из wireshark: 01 00 - Give tokens PDU (тип 1, длина 0)
+func BuildGiveTokensSPDU() []byte {
+	return []byte{0x01, 0x00}
+}
+
+// BuildDataTransferSPDU создаёт DATA TRANSFER (DT) SPDU для отправки данных после установления соединения.
+// Структура DT SPDU согласно ISO 8327-1:
+// - SPDU Type: 1 (DT)
+// - Length: 0 (данные идут отдельно после SPDU)
+// - User Data: данные от Presentation уровня идут после SPDU
+// Из wireshark: 01 00 - DT SPDU с длиной 0, затем идет Presentation PDU
+// Для передачи данных после установления соединения используется формат:
+// - Type: 1
+// - Length: 0
+// - User Data: содержимое userData идет после SPDU (не включается в длину)
+func BuildDataTransferSPDU(userData []byte) []byte {
+	// DT SPDU: Type (1) + Length (0) + User Data (идет после)
+	buf := make([]byte, 2+len(userData))
+	offset := 0
+
+	// SPDU Type: DATA TRANSFER (DT) = 1
+	buf[offset] = byte(SessionSPDUTypeData)
+	offset++
+
+	// Length: 0 (данные идут отдельно)
+	buf[offset] = 0
+	offset++
+
+	// Копируем userData после SPDU
+	copy(buf[offset:], userData)
+	offset += len(userData)
+
+	return buf[:offset]
+}
+
+// BuildDataTransferWithTokens создаёт полный пакет Session для передачи данных:
+// Give tokens PDU + DT SPDU + Presentation PDU
+// Это соответствует структуре из wireshark: 01 00 01 00 <Presentation PDU>
+func BuildDataTransferWithTokens(presentationData []byte) []byte {
+	gtSPDU := BuildGiveTokensSPDU()
+	dtSPDU := BuildDataTransferSPDU(presentationData)
+	
+	// Объединяем: GT SPDU + DT SPDU (который уже включает Presentation PDU)
+	buf := make([]byte, len(gtSPDU)+len(dtSPDU))
+	copy(buf, gtSPDU)
+	copy(buf[len(gtSPDU):], dtSPDU)
+	
+	return buf
+}
+
 // SessionSPDUType представляет тип Session SPDU
 type SessionSPDUType uint8
 
@@ -212,11 +266,78 @@ type SessionSPDU struct {
 }
 
 // ParseSessionSPDU парсит Session SPDU из байтового буфера
+// Может содержать несколько SPDU подряд (например, GT SPDU + DT SPDU)
+// Парсит последний DATA SPDU с данными
 func ParseSessionSPDU(data []byte) (*SessionSPDU, error) {
 	if len(data) < 2 {
 		return nil, errors.New("Session SPDU too short: need at least 2 bytes")
 	}
 
+	// Ищем последний DATA SPDU в payload
+	// Может быть несколько SPDU подряд: GT (01 00) + DT (01 00) + данные
+	offset := 0
+	lastDataSPDUOffset := -1
+	
+	for offset < len(data) {
+		if offset+2 > len(data) {
+			break
+		}
+		
+		spduType := SessionSPDUType(data[offset])
+		spduLength := data[offset+1]
+		
+		// Если это DATA SPDU, запоминаем его позицию
+		if spduType == SessionSPDUTypeData {
+			lastDataSPDUOffset = offset
+		}
+		
+		// Переходим к следующему SPDU
+		// Для DATA SPDU с длиной 0, данные идут после SPDU, поэтому ищем следующий SPDU
+		if spduLength == 0 {
+			// Если длина 0, следующий SPDU может идти сразу после (2 байта)
+			offset += 2
+		} else {
+			// Если длина не 0, следующий SPDU идет после Type + Length + Length bytes
+			offset += 2 + int(spduLength)
+		}
+		
+		// Если после DATA SPDU с длиной 0 больше нет SPDU, выходим
+		if spduType == SessionSPDUTypeData && spduLength == 0 && offset >= len(data) {
+			break
+		}
+	}
+	
+	// Если нашли DATA SPDU, парсим его
+	if lastDataSPDUOffset >= 0 {
+		spdu := &SessionSPDU{
+			Type:   SessionSPDUTypeData,
+			Length: data[lastDataSPDUOffset+1],
+		}
+		
+		// Для DATA SPDU с длиной 0, данные идут сразу после SPDU
+		if spdu.Length == 0 {
+			dataStart := lastDataSPDUOffset + 2
+			if dataStart < len(data) {
+				spdu.Data = make([]byte, len(data)-dataStart)
+				copy(spdu.Data, data[dataStart:])
+			} else {
+				spdu.Data = []byte{}
+			}
+		} else {
+			// Если длина не 0, данные включены в длину
+			dataStart := lastDataSPDUOffset + 2
+			dataLength := int(spdu.Length)
+			if dataStart+dataLength <= len(data) {
+				spdu.Data = make([]byte, dataLength)
+				copy(spdu.Data, data[dataStart:dataStart+dataLength])
+			} else {
+				spdu.Data = []byte{}
+			}
+		}
+		return spdu, nil
+	}
+	
+	// Если DATA SPDU не найден, парсим первый SPDU как обычно
 	spdu := &SessionSPDU{
 		Type:   SessionSPDUType(data[0]),
 		Length: data[1],
@@ -232,8 +353,8 @@ func ParseSessionSPDU(data []byte) (*SessionSPDU, error) {
 		return nil, fmt.Errorf("Session SPDU incomplete: need %d bytes, got %d", spduTotalLength, len(data))
 	}
 
-	// Парсим параметры
-	offset := 2 // Начинаем после Type и Length
+	// Для других типов SPDU парсим параметры
+	offset = 2 // Начинаем после Type и Length
 	userDataStart := -1
 	userDataLength := 0
 
