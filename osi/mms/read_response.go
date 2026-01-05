@@ -370,8 +370,8 @@ func parseReadServiceResponse(buffer []byte, maxLength int) ([]AccessResult, err
 			bufPos += length
 
 		default:
-			// Пропускаем неизвестные теги
-			bufPos += length
+			// Неподдерживаемый тег - возвращаем ошибку с указанием номера тега
+			return nil, fmt.Errorf("unsupported tag: 0x%02x", tag)
 		}
 	}
 
@@ -462,8 +462,8 @@ func parseListOfAccessResult(buffer []byte, maxLength int) ([]AccessResult, erro
 			bufPos += length
 
 		default:
-			// Пропускаем неизвестные теги
-			bufPos += length
+			// Неподдерживаемый тег - возвращаем ошибку с указанием номера тега
+			return nil, fmt.Errorf("unsupported tag: 0x%02x", tag)
 		}
 	}
 

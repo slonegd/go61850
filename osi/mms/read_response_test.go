@@ -163,6 +163,25 @@ func TestParseReadResponse(t *testing.T) {
 				}},
 			},
 		},
+		{
+			// Пакет с неподдерживаемым тегом 0xa2:
+			// a1 21 - read (Context-specific 1, Constructed, длина 33 байта)
+			//   02 01 01 - invokeID = 1
+			//   a4 1c - confirmedServiceResponse: read (Context-specific 4, Constructed, длина 28 байт)
+			//      a1 1a - read (Context-specific 1, Constructed, длина 26 байт)
+			//         a2 18 - Context-specific 2, Constructed, длина 24 байта - НЕПОДДЕРЖИВАЕМЫЙ ТЕГ
+			//            a2 07 - Context-specific 2, Constructed, длина 7 байт - НЕПОДДЕРЖИВАЕМЫЙ ТЕГ
+			//               87 05 08 3f 72 79 71 - floating-point значение
+			//           84 03 03 00 00 - bit-string значение
+			//           91 08 69 5b 9e d0 ab c6 a7 80 - utc-time значение
+			// При встрече тега 0xa2 должна быть ошибка с указанием номера тега
+			name:   "неподдерживаемый тег 0xa2",
+			buffer: "a121020101a41ca11aa218a2078705083f72797184030300009108695b9ed0abc6a780",
+			want: ReadResponse{
+				InvokeID: 1,
+			},
+			wantError: "failed to parse read service response: unsupported tag: 0xa2",
+		},
 	}
 
 	for _, tt := range tests {
