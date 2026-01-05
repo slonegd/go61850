@@ -3,6 +3,7 @@ package variant
 import (
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Type представляет тип значения в MMS Data
@@ -13,6 +14,8 @@ const (
 	Float32 Type = iota
 	// Int32 - 32-bit signed integer
 	Int32
+	// UTCTime - UTC time согласно ISO/IEC 9506-2 (8 байт: 4 байта секунды + 3 байта доля секунды + 1 байт качество)
+	UTCTime
 	// Bool - boolean (будет добавлено позже)
 	// String - visible string (будет добавлено позже)
 )
@@ -24,6 +27,8 @@ func (t Type) String() string {
 		return "float32"
 	case Int32:
 		return "int32"
+	case UTCTime:
+		return "utc-time"
 	default:
 		// Используем strings.Builder вместо fmt.Sprintf для лучшей производительности
 		var b strings.Builder
@@ -38,6 +43,7 @@ func (t Type) String() string {
 // Согласно ISO/IEC 9506-2, Data может быть разных типов:
 // - floating-point (IEEE 754 single precision)
 // - integer (32-bit signed)
+// - utc-time (UTC time, 8 байт)
 // - bool (boolean)
 // - visible-string
 // и т.д.
@@ -103,6 +109,29 @@ func NewInt32Variant(value int32) *Variant {
 	}
 }
 
+// Time возвращает значение как time.Time
+// Если тип не совпадает, возвращает нулевое время
+func (v *Variant) Time() time.Time {
+	if v == nil {
+		return time.Time{}
+	}
+
+	switch val := v.value.(type) {
+	case time.Time:
+		return val
+	default:
+		return time.Time{}
+	}
+}
+
+// NewUTCTimeVariant создаёт новый Variant с time.Time значением
+func NewUTCTimeVariant(value time.Time) *Variant {
+	return &Variant{
+		typ:   UTCTime,
+		value: value,
+	}
+}
+
 // String возвращает строковое представление Variant в формате "тип(значение)"
 // Например: "float32(4.2)"
 // Использует strings.Builder вместо fmt.Sprintf для лучшей производительности GC
@@ -124,6 +153,10 @@ func (v *Variant) String() string {
 		val := v.Int32()
 		// Используем strconv.FormatInt для форматирования без fmt.Sprintf
 		b.WriteString(strconv.FormatInt(int64(val), 10))
+	case UTCTime:
+		val := v.Time()
+		// Форматируем время в RFC3339 с наносекундами
+		b.WriteString(val.Format(time.RFC3339Nano))
 	default:
 		b.WriteString("<unknown>")
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/slonegd/go61850/ber"
 	"github.com/slonegd/go61850/osi/mms/variant"
@@ -333,6 +334,18 @@ func parseReadServiceResponse(buffer []byte, maxLength int) ([]AccessResult, err
 			})
 			bufPos += length
 
+		case 0x91: // success (Context-specific 17) - utc-time
+			// Парсим UTC time значение
+			value, err := parseUTCTime(buffer[bufPos:bufPos+length], length)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse utc-time: %w", err)
+			}
+			results = append(results, AccessResult{
+				Success: true,
+				Value:   variant.NewUTCTimeVariant(value),
+			})
+			bufPos += length
+
 		case 0x80: // failure (Context-specific 0) - DataAccessError
 			// Парсим ошибку доступа к данным
 			errorCode := DataAccessErrorCode(ber.DecodeUint32(buffer, length, bufPos))
@@ -401,6 +414,18 @@ func parseListOfAccessResult(buffer []byte, maxLength int) ([]AccessResult, erro
 			})
 			bufPos += length
 
+		case 0x91: // success (Context-specific 17) - utc-time
+			// Парсим UTC time значение
+			value, err := parseUTCTime(buffer[bufPos:bufPos+length], length)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse utc-time: %w", err)
+			}
+			results = append(results, AccessResult{
+				Success: true,
+				Value:   variant.NewUTCTimeVariant(value),
+			})
+			bufPos += length
+
 		case 0x80: // failure (Context-specific 0) - DataAccessError
 			// Парсим ошибку
 			errorCode := DataAccessErrorCode(ber.DecodeUint32(buffer, length, bufPos))
@@ -460,6 +485,38 @@ func parseInteger(buffer []byte, length int) (int32, error) {
 	return value, nil
 }
 
+// parseUTCTime парсит UTC time значение
+// Структура согласно ISO/IEC 9506-2:
+// - 4 байта: секунды с 1 января 1970 00:00:00 UTC (big-endian uint32)
+// - 3 байта: доля секунды (fraction of second) в единицах 1/2^24 секунды
+// - 1 байт: качество времени (time quality)
+// Итого 8 байт
+// Основано на MmsValue_getUtcTimeInMsWithUs из mms_value.c
+func parseUTCTime(buffer []byte, length int) (time.Time, error) {
+	if length != 8 {
+		return time.Time{}, fmt.Errorf("invalid utc-time length: expected 8 bytes, got %d", length)
+	}
+
+	// Декодируем секунды (первые 4 байта, big-endian)
+	seconds := binary.BigEndian.Uint32(buffer[0:4])
+
+	// Декодируем долю секунды (байты 4-6)
+	// fractionOfSecond в единицах 1/2^24 секунды
+	fractionOfSecond := uint32(buffer[4])<<16 | uint32(buffer[5])<<8 | uint32(buffer[6])
+
+	// Преобразуем долю секунды в наносекунды
+	// fractionOfSecond * 1_000_000_000 / 2^24
+	// Используем uint64 для избежания переполнения
+	nanoseconds := uint64(fractionOfSecond) * 1_000_000_000 / 0x1000000
+
+	// Качество времени (байт 7) игнорируем, так как оно не влияет на значение времени
+
+	// Создаём time.Time из секунд и наносекунд
+	t := time.Unix(int64(seconds), int64(nanoseconds)).UTC()
+
+	return t, nil
+}
+
 // String возвращает строковое представление ReadResponse
 func (r *ReadResponse) String() string {
 	if len(r.ListOfAccessResult) == 0 {
@@ -479,6 +536,9 @@ func (r *ReadResponse) String() string {
 				case variant.Int32:
 					val := result.Value.Int32()
 					results = append(results, fmt.Sprintf("Result[%d]: %d", i, val))
+				case variant.UTCTime:
+					val := result.Value.Time()
+					results = append(results, fmt.Sprintf("Result[%d]: %s", i, val.Format(time.RFC3339Nano)))
 				default:
 					results = append(results, fmt.Sprintf("Result[%d]: <unknown type: %v>", i, result.Value.Type()))
 				}

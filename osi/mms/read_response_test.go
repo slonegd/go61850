@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/slonegd/go61850/osi/mms/variant"
 	"github.com/stretchr/testify/assert"
@@ -118,6 +119,27 @@ func TestParseReadResponse(t *testing.T) {
 			name:      "неверная длина - превышает размер буфера",
 			buffer:    "a0ff020101",
 			wantError: "failed to decode length: buffer overflow",
+		},
+		{
+			// Пакет из wireshark:
+			// a1 11 - read (Context-specific 1, Constructed, длина 17 байт)
+			//   02 01 01 - invokeID = 1
+			//   a4 0c - confirmedServiceResponse: read (Context-specific 4, Constructed, длина 12 байт)
+			//      a1 0a - read (Context-specific 1, Constructed, длина 10 байт)
+			//         91 08 - utc-time (Context-specific 17, Primitive, длина 8 байт)
+			//            69 5b 76 07 - секунды (big-endian uint32) = 1767605767
+			//            27 6c 8b - доля секунды = 2581643 единиц из 2^24
+			//            80 - качество времени
+			// Время: Jan 5, 2026 08:27:51.153999984 UTC
+			name:   "UTC time успех",
+			buffer: "a111020101a40ca10a9108695b7607276c8b80",
+			want: ReadResponse{
+				InvokeID: 1,
+				ListOfAccessResult: []AccessResult{{
+					Success: true,
+					Value:   variant.NewUTCTimeVariant(time.Date(2026, 1, 5, 8, 27, 51, 153999984, time.UTC)),
+				}},
+			},
 		},
 	}
 
