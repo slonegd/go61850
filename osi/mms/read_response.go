@@ -35,8 +35,8 @@ import (
 //	  array [0] IMPLICIT SEQUENCE OF Data,
 //	  structure [1] IMPLICIT SEQUENCE OF Data,
 //	  bool [2] IMPLICIT BOOLEAN,
-//	  bit-string [3] IMPLICIT BIT STRING,
-//	  integer [4] IMPLICIT INTEGER,
+//	  bit-string [4] IMPLICIT BIT STRING,  // Context-specific 4 = 0x84
+//	  integer [5] IMPLICIT INTEGER,         // Context-specific 5 = 0x85
 //	  unsigned [5] IMPLICIT Unsigned,
 //	  floating-point [6] IMPLICIT FloatingPoint,
 //	  octet-string [7] IMPLICIT OCTET STRING,
@@ -322,7 +322,19 @@ func parseReadServiceResponse(buffer []byte, maxLength int) ([]AccessResult, err
 			})
 			bufPos += length
 
-		case 0x84: // success (Context-specific 4) - integer
+		case 0x84: // success (Context-specific 4) - bit-string
+			// Парсим bit-string значение
+			value, err := parseBitString(buffer[bufPos:bufPos+length], length)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse bit-string: %w", err)
+			}
+			results = append(results, AccessResult{
+				Success: true,
+				Value:   value,
+			})
+			bufPos += length
+
+		case 0x85: // success (Context-specific 5) - integer
 			// Парсим integer значение
 			value, err := parseInteger(buffer[bufPos:bufPos+length], length)
 			if err != nil {
@@ -402,7 +414,19 @@ func parseListOfAccessResult(buffer []byte, maxLength int) ([]AccessResult, erro
 			})
 			bufPos += length
 
-		case 0x84: // success (Context-specific 4) - integer
+		case 0x84: // success (Context-specific 4) - bit-string
+			// Парсим bit-string значение
+			value, err := parseBitString(buffer[bufPos:bufPos+length], length)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse bit-string: %w", err)
+			}
+			results = append(results, AccessResult{
+				Success: true,
+				Value:   value,
+			})
+			bufPos += length
+
+		case 0x85: // success (Context-specific 5) - integer
 			// Парсим integer значение
 			value, err := parseInteger(buffer[bufPos:bufPos+length], length)
 			if err != nil {
@@ -485,6 +509,36 @@ func parseInteger(buffer []byte, length int) (int32, error) {
 	return value, nil
 }
 
+// parseBitString парсит bit-string значение
+// Структура согласно ISO/IEC 9506-2:
+// - 1 байт: padding (количество неиспользуемых бит в последнем байте, 0-7)
+// - N байт: данные bit-string
+// Основано на mms_access_result.c case 0x84
+func parseBitString(buffer []byte, length int) (*variant.Variant, error) {
+	if length < 1 {
+		return nil, fmt.Errorf("invalid bit-string length: expected at least 1 byte, got %d", length)
+	}
+
+	padding := int(buffer[0])
+	if padding > 7 {
+		return nil, fmt.Errorf("invalid bit-string padding: expected 0-7, got %d", padding)
+	}
+
+	// Данные начинаются со второго байта
+	dataLength := length - 1
+	if dataLength < 0 {
+		return nil, fmt.Errorf("invalid bit-string length: no data bytes")
+	}
+
+	data := make([]byte, dataLength)
+	copy(data, buffer[1:1+dataLength])
+
+	// Вычисляем количество значащих бит
+	bitSize := (8 * dataLength) - padding
+
+	return variant.NewBitStringVariant(data, bitSize), nil
+}
+
 // parseUTCTime парсит UTC time значение
 // Структура согласно ISO/IEC 9506-2:
 // - 4 байта: секунды с 1 января 1970 00:00:00 UTC (big-endian uint32)
@@ -539,6 +593,9 @@ func (r *ReadResponse) String() string {
 				case variant.UTCTime:
 					val := result.Value.Time()
 					results = append(results, fmt.Sprintf("Result[%d]: %s", i, val.Format(time.RFC3339Nano)))
+				case variant.BitString:
+					val := result.Value.BitString()
+					results = append(results, fmt.Sprintf("Result[%d]: bit-string(%d bits)", i, val.BitSize))
 				default:
 					results = append(results, fmt.Sprintf("Result[%d]: <unknown type: %v>", i, result.Value.Type()))
 				}

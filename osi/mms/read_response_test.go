@@ -141,6 +141,28 @@ func TestParseReadResponse(t *testing.T) {
 				}},
 			},
 		},
+		{
+			// Пакет из wireshark:
+			// a1 0c - read (Context-specific 1, Constructed, длина 12 байт)
+			//   02 01 01 - invokeID = 1
+			//   a4 07 - confirmedServiceResponse: read (Context-specific 4, Constructed, длина 7 байт)
+			//      a1 05 - read (Context-specific 1, Constructed, длина 5 байт)
+			//         84 03 - bit-string (Context-specific 4, Primitive, длина 3 байта)
+			//            03 - padding: 3 неиспользуемых бита
+			//            00 00 - данные: 2 байта = 16 бит, минус 3 padding = 13 значащих бит
+			//            Но на самом деле: 2 байта * 8 = 16 бит, padding 3, значит 13 значащих бит
+			//            Данные: 0x0000, но последние 3 бита не используются
+			//            Значит значащие биты: первые 13 бит из 0x0000 = 0b0000000000000 = 0
+			name:   "bit-string успех",
+			buffer: "a10c020101a407a1058403030000",
+			want: ReadResponse{
+				InvokeID: 1,
+				ListOfAccessResult: []AccessResult{{
+					Success: true,
+					Value:   variant.NewBitStringVariant([]byte{0x00, 0x00}, 13),
+				}},
+			},
+		},
 	}
 
 	for _, tt := range tests {
