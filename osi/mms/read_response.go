@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/slonegd/go61850/ber"
+	"github.com/slonegd/go61850/osi/mms/variant"
 )
 
 // ReadResponse представляет MMS Read Response PDU
@@ -54,7 +55,7 @@ type ReadResponse struct {
 // AccessResult представляет результат доступа к переменной
 type AccessResult struct {
 	Success bool
-	Value   interface{} // Может быть float32, int32, bool, string и т.д.
+	Value   *variant.Variant // Типизированное значение MMS Data
 	Error   *DataAccessError
 }
 
@@ -66,18 +67,20 @@ type DataAccessError struct {
 // ParseReadResponse парсит MMS Read Response PDU из BER-кодированного буфера
 // Структура из wireshark:
 // a0 10 - confirmed-ResponsePDU (Context-specific 0, Constructed, длина 16 байт)
-//   02 01 01 - invokeID (INTEGER, длина 1, значение 1)
-//   a4 09 - confirmedServiceResponse: read (Context-specific 4, Constructed, длина 9 байт)
-//      a1 07 - read (Context-specific 1, Constructed, длина 7 байт)
-//         87 05 - listOfAccessResult: success (Context-specific 7, длина 5 байт)
-//            08 3d a8 83 7c - floating-point: формат 0x08 (IEEE 754 single) + 4 байта значения
-// 
+//
+//	02 01 01 - invokeID (INTEGER, длина 1, значение 1)
+//	a4 09 - confirmedServiceResponse: read (Context-specific 4, Constructed, длина 9 байт)
+//	   a1 07 - read (Context-specific 1, Constructed, длина 7 байт)
+//	      87 05 - listOfAccessResult: success (Context-specific 7, длина 5 байт)
+//	         08 3d a8 83 7c - floating-point: формат 0x08 (IEEE 754 single) + 4 байта значения
+//
 // После установления соединения данные могут приходить без внешнего тега confirmed-ResponsePDU:
 // a1 0e - read (Context-specific 1, Constructed, длина 14 байт)
-//   02 01 01 - invokeID
-//   a4 09 - confirmedServiceResponse: read
-//      a1 07 - read
-//         87 05 - success
+//
+//	02 01 01 - invokeID
+//	a4 09 - confirmedServiceResponse: read
+//	   a1 07 - read
+//	      87 05 - success
 func ParseReadResponse(buffer []byte) (*ReadResponse, error) {
 	if len(buffer) == 0 {
 		return nil, errors.New("empty buffer")
@@ -313,7 +316,19 @@ func parseReadServiceResponse(buffer []byte, maxLength int) ([]AccessResult, err
 			}
 			results = append(results, AccessResult{
 				Success: true,
-				Value:   value,
+				Value:   variant.NewFloat32Variant(value),
+			})
+			bufPos += length
+
+		case 0x84: // success (Context-specific 4) - integer
+			// Парсим integer значение
+			value, err := parseInteger(buffer[bufPos:bufPos+length], length)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse integer: %w", err)
+			}
+			results = append(results, AccessResult{
+				Success: true,
+				Value:   variant.NewInt32Variant(value),
 			})
 			bufPos += length
 
@@ -358,7 +373,19 @@ func parseListOfAccessResult(buffer []byte, maxLength int) ([]AccessResult, erro
 			}
 			results = append(results, AccessResult{
 				Success: true,
-				Value:   value,
+				Value:   variant.NewFloat32Variant(value),
+			})
+			bufPos += length
+
+		case 0x84: // success (Context-specific 4) - integer
+			// Парсим integer значение
+			value, err := parseInteger(buffer[bufPos:bufPos+length], length)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse integer: %w", err)
+			}
+			results = append(results, AccessResult{
+				Success: true,
+				Value:   variant.NewInt32Variant(value),
 			})
 			bufPos += length
 
@@ -403,6 +430,24 @@ func parseFloatingPoint(buffer []byte, length int) (float32, error) {
 	return value, nil
 }
 
+// parseInteger парсит integer значение
+// INTEGER в BER кодируется как signed integer в big-endian формате
+// Длина может быть от 1 до 4 байт для 32-bit integer
+func parseInteger(buffer []byte, length int) (int32, error) {
+	if length < 1 {
+		return 0, fmt.Errorf("invalid integer length: expected at least 1 byte, got %d", length)
+	}
+	if length > 4 {
+		return 0, fmt.Errorf("invalid integer length: expected at most 4 bytes for int32, got %d", length)
+	}
+
+	// Используем ber.DecodeInt32 для декодирования signed integer
+	// bufPos = 0, так как buffer уже является срезом с нужными данными
+	value := ber.DecodeInt32(buffer, length, 0)
+
+	return value, nil
+}
+
 // String возвращает строковое представление ReadResponse
 func (r *ReadResponse) String() string {
 	if len(r.ListOfAccessResult) == 0 {
@@ -412,17 +457,19 @@ func (r *ReadResponse) String() string {
 	var results []string
 	for i, result := range r.ListOfAccessResult {
 		if result.Success {
-			switch v := result.Value.(type) {
-			case float32:
-				results = append(results, fmt.Sprintf("Result[%d]: %f", i, v))
-			case int32:
-				results = append(results, fmt.Sprintf("Result[%d]: %d", i, v))
-			case bool:
-				results = append(results, fmt.Sprintf("Result[%d]: %t", i, v))
-			case string:
-				results = append(results, fmt.Sprintf("Result[%d]: %s", i, v))
-			default:
-				results = append(results, fmt.Sprintf("Result[%d]: %v", i, v))
+			if result.Value == nil {
+				results = append(results, fmt.Sprintf("Result[%d]: <nil>", i))
+			} else {
+				switch result.Value.Type() {
+				case variant.Float32:
+					val := result.Value.Float32()
+					results = append(results, fmt.Sprintf("Result[%d]: %f", i, val))
+				case variant.Int32:
+					val := result.Value.Int32()
+					results = append(results, fmt.Sprintf("Result[%d]: %d", i, val))
+				default:
+					results = append(results, fmt.Sprintf("Result[%d]: <unknown type: %v>", i, result.Value.Type()))
+				}
 			}
 		} else {
 			results = append(results, fmt.Sprintf("Result[%d]: Error(code=%d)", i, result.Error.ErrorCode))
@@ -431,4 +478,3 @@ func (r *ReadResponse) String() string {
 
 	return fmt.Sprintf("ReadResponse{InvokeID: %d, Results: [%s]}", r.InvokeID, fmt.Sprint(results))
 }
-

@@ -106,8 +106,9 @@ func TestProofOfConcept(t *testing.T) {
 	for _, msg := range mockLogger.rxMessages {
 		if strings.Contains(msg, "ReadObject result:") {
 			hasReadResult = true
-			// Проверяем, что результат содержит ожидаемый формат
-			if !strings.Contains(msg, "Object:") || !strings.Contains(msg, "Value:") {
+			// Проверяем, что результат содержит ожидаемый формат AccessResult
+			// Формат: &{Success:true Value:... Error:...}
+			if !strings.Contains(msg, "Success:") || !strings.Contains(msg, "Value:") {
 				t.Errorf("ReadObject result has unexpected format: %s", msg)
 			}
 			t.Logf("ReadObject result parsed successfully: %s", msg)

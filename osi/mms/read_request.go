@@ -1,6 +1,8 @@
 package mms
 
 import (
+	"strings"
+
 	"github.com/slonegd/go61850/ber"
 )
 
@@ -178,11 +180,81 @@ func (r *ReadRequest) buildDomainSpecificName() []byte {
 	return buffer[:bufPos]
 }
 
-// NewReadRequest создаёт новый ReadRequest
-func NewReadRequest(invokeID uint32, domainID, itemID string) *ReadRequest {
-	return &ReadRequest{
-		InvokeID: invokeID,
-		DomainID: domainID,
-		ItemID:   itemID,
+// FunctionalConstraint представляет функциональное ограничение IEC 61850
+type FunctionalConstraint string
+
+const (
+	FCNone FunctionalConstraint = ""   // Нет функционального ограничения
+	FCMX   FunctionalConstraint = "MX" // Measurand (измеряемая величина)
+	FCST   FunctionalConstraint = "ST" // Status (статус)
+	FCSP   FunctionalConstraint = "SP" // SetPoint (уставка)
+	FCSV   FunctionalConstraint = "SV" // Substitution Value (подстановочное значение)
+	FCCF   FunctionalConstraint = "CF" // Configuration (конфигурация)
+	FCDC   FunctionalConstraint = "DC" // Description (описание)
+	FCSG   FunctionalConstraint = "SG" // Setting Group (группа уставок)
+	FCSE   FunctionalConstraint = "SE" // Setting Group Editable (редактируемая группа уставок)
+	FCSR   FunctionalConstraint = "SR" // Service Response (ответ сервиса)
+	FCOR   FunctionalConstraint = "OR" // Operate (операция)
+	FCBL   FunctionalConstraint = "BL" // Blocking (блокировка)
+	FCEX   FunctionalConstraint = "EX" // Extended Definition (расширенное определение)
+	FCCO   FunctionalConstraint = "CO" // Control (управление)
+)
+
+// NewReadRequestFromObjectName создаёт MMS ReadRequest из objectName и FunctionalConstraint.
+// Разбирает objectName на domainID и itemID, преобразует itemID в формат MMS с учётом функционального ограничения.
+//
+// Формат objectName: "domain/item" или "item"
+// Пример: "simpleIOGenericIO/GGIO1.AnIn1.mag.f" -> domainID="simpleIOGenericIO", itemID="GGIO1.AnIn1.mag.f"
+// Или: "GGIO1.AnIn1.mag.f" -> domainID="simpleIOGenericIO" (дефолтный), itemID="GGIO1.AnIn1.mag.f"
+//
+// Преобразование itemID в формат MMS:
+// - Если указан FunctionalConstraint (fc), первая точка заменяется на $FC$ (например, $MX$)
+// - Остальные точки заменяются на $
+// - Пример: "GGIO1.AnIn1.mag.f" с FC_MX -> "GGIO1$MX$AnIn1$mag$f"
+// - Если FC не указан, все точки заменяются на $
+//
+// invokeID устанавливается в 1 (стандартное значение для первого запроса).
+func NewReadRequest(objectName string, fc FunctionalConstraint) *ReadRequest {
+	// Разбираем objectName на domainID и itemID
+	// Формат: "domain/item" или просто "item"
+	var domainID, itemID string
+	if idx := strings.Index(objectName, "/"); idx >= 0 {
+		domainID = objectName[:idx]
+		itemID = objectName[idx+1:]
+	} else {
+		// Если разделителя нет, используем весь objectName как itemID
+		// domainID будет пустым (или можно использовать дефолтный)
+		itemID = objectName
+		// Для примера из wireshark используем "simpleIOGenericIO" как дефолтный domain
+		// В реальности это должно быть настроено или получено из конфигурации
+		if domainID == "" {
+			domainID = "simpleIOGenericIO"
+		}
 	}
+
+	// Преобразуем точки в доллары для itemID с учетом функционального ограничения
+	// Логика согласно MmsMapping_createMmsVariableNameFromObjectReference:
+	// - Первая точка заменяется на $FC$ (например, $MX$)
+	// - Остальные точки заменяются на $
+	// Пример: "GGIO1.AnIn1.mag.f" с FC_MX -> "GGIO1$MX$AnIn1$mag$f"
+	// Если FC не указан, все точки заменяются на $
+	if !strings.Contains(itemID, "$") {
+		if fc != FCNone && fc != "" {
+			// Заменяем первую точку на $FC$
+			if idx := strings.Index(itemID, "."); idx >= 0 {
+				itemID = itemID[:idx] + "$" + string(fc) + "$" + itemID[idx+1:]
+				// Заменяем остальные точки на $
+				itemID = strings.ReplaceAll(itemID, ".", "$")
+			} else {
+				// Если точек нет, добавляем $FC$ в конец
+				itemID = itemID + "$" + string(fc)
+			}
+		} else {
+			// Если FC не указан, просто заменяем все точки на $
+			itemID = strings.ReplaceAll(itemID, ".", "$")
+		}
+	}
+
+	// invokeID = 1 для первого запроса
+	return &ReadRequest{1, domainID, itemID}
 }

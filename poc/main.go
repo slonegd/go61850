@@ -206,16 +206,13 @@ import (
 
 	"github.com/slonegd/go61850"
 	"github.com/slonegd/go61850/logger"
+	"github.com/slonegd/go61850/osi/mms"
 )
 
 // proofOfConcept выполняет Proof of Concept: устанавливает COTP соединение,
 // отправляет MMS Initiate Request и получает ответ, затем читает объект.
 func proofOfConcept(conn net.Conn, l logger.Logger) error {
-	opts := []go61850.MmsClientOption{}
-	if l != nil {
-		opts = append(opts, go61850.WithLogger(l))
-	}
-	client := go61850.NewMmsClient(conn, opts...)
+	client := go61850.NewMmsClient(conn, go61850.WithLogger(l))
 
 	ctx := context.Background()
 	response, err := client.Initiate(ctx)
@@ -227,12 +224,13 @@ func proofOfConcept(conn net.Conn, l logger.Logger) error {
 
 	// Читаем объект из сервера
 	objectName := "simpleIOGenericIO/GGIO1.AnIn1.mag.f"
-	readResult, err := client.ReadObject(ctx, objectName, go61850.FCMX)
+	readRequest := mms.NewReadRequest(objectName, mms.FCMX)
+	readResult, err := client.ReadObject(ctx, readRequest)
 	if err != nil {
 		return err
 	}
 
-	l.Debug("ReadObject result: %s", readResult)
+	l.Debug("ReadObject result: %+v", readResult)
 
 	return nil
 }
