@@ -223,7 +223,7 @@ func proofOfConcept(conn net.Conn, l logger.Logger) error {
 	l.Debug("MMS InitiateResponse: %s", response)
 
 	// Читаем объект из сервера
-	objectName := "simpleIOGenericIO/GGIO1.AnIn1.mag.f"
+	objectName := "simpleIOGenericIO/GGIO1"
 	readRequest := mms.NewReadRequest(objectName, mms.FCMX)
 	readResult, err := client.ReadObject(ctx, readRequest)
 	if err != nil {

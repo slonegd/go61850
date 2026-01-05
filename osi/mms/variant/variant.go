@@ -18,6 +18,8 @@ const (
 	UTCTime
 	// BitString - bit string согласно ISO/IEC 9506-2
 	BitString
+	// Structure - structure (структура) согласно ISO/IEC 9506-2, содержит последовательность элементов Data
+	Structure
 	// Bool - boolean (будет добавлено позже)
 	// String - visible string (будет добавлено позже)
 )
@@ -33,6 +35,8 @@ func (t Type) String() string {
 		return "utc-time"
 	case BitString:
 		return "bit-string"
+	case Structure:
+		return "structure"
 	default:
 		// Используем strings.Builder вместо fmt.Sprintf для лучшей производительности
 		var b strings.Builder
@@ -157,6 +161,29 @@ func NewBitStringVariant(data []byte, bitSize int) *Variant {
 	}
 }
 
+// NewStructureVariant создаёт новый Variant с структурой (массивом элементов)
+func NewStructureVariant(elements []*Variant) *Variant {
+	return &Variant{
+		typ:   Structure,
+		value: elements,
+	}
+}
+
+// Structure возвращает значение как []*Variant (элементы структуры)
+// Если тип не совпадает, возвращает nil
+func (v *Variant) Structure() []*Variant {
+	if v == nil {
+		return nil
+	}
+
+	switch val := v.value.(type) {
+	case []*Variant:
+		return val
+	default:
+		return nil
+	}
+}
+
 // BitString возвращает значение как BitStringValue
 // Если тип не совпадает, возвращает пустое значение
 func (v *Variant) BitString() BitStringValue {
@@ -174,6 +201,7 @@ func (v *Variant) BitString() BitStringValue {
 
 // String возвращает строковое представление Variant в формате "тип(значение)"
 // Например: "float32(4.2)"
+// Для структуры используется формат "struct{элемент1, элемент2, ...}" без префикса "structure("
 // Использует strings.Builder вместо fmt.Sprintf для лучшей производительности GC
 func (v *Variant) String() string {
 	if v == nil {
@@ -181,6 +209,25 @@ func (v *Variant) String() string {
 	}
 
 	var b strings.Builder
+
+	// Для структуры используем специальный формат без префикса "structure("
+	if v.typ == Structure {
+		val := v.Structure()
+		b.WriteString("struct{")
+		for i, elem := range val {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			if elem != nil {
+				b.WriteString(elem.String())
+			} else {
+				b.WriteString("<nil>")
+			}
+		}
+		b.WriteString("}")
+		return b.String()
+	}
+
 	b.WriteString(v.typ.String())
 	b.WriteByte('(')
 

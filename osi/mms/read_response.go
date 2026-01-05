@@ -358,6 +358,18 @@ func parseReadServiceResponse(buffer []byte, maxLength int) ([]AccessResult, err
 			})
 			bufPos += length
 
+		case 0xA2: // success (Context-specific 2) - structure
+			// Парсим structure значение
+			value, err := parseStructure(buffer[bufPos:bufPos+length], length)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse structure: %w", err)
+			}
+			results = append(results, AccessResult{
+				Success: true,
+				Value:   value,
+			})
+			bufPos += length
+
 		case 0x80: // failure (Context-specific 0) - DataAccessError
 			// Парсим ошибку доступа к данным
 			errorCode := DataAccessErrorCode(ber.DecodeUint32(buffer, length, bufPos))
@@ -447,6 +459,18 @@ func parseListOfAccessResult(buffer []byte, maxLength int) ([]AccessResult, erro
 			results = append(results, AccessResult{
 				Success: true,
 				Value:   variant.NewUTCTimeVariant(value),
+			})
+			bufPos += length
+
+		case 0xA2: // success (Context-specific 2) - structure
+			// Парсим structure значение
+			value, err := parseStructure(buffer[bufPos:bufPos+length], length)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse structure: %w", err)
+			}
+			results = append(results, AccessResult{
+				Success: true,
+				Value:   value,
 			})
 			bufPos += length
 
@@ -571,6 +595,112 @@ func parseUTCTime(buffer []byte, length int) (time.Time, error) {
 	return t, nil
 }
 
+// parseStructure парсит structure значение
+// Структура согласно ISO/IEC 9506-2:
+// - structure [2] IMPLICIT SEQUENCE OF Data (тег 0xA2, Context-specific 2, Constructed)
+// Структура содержит последовательность элементов Data, которые парсятся рекурсивно
+// Основано на MmsValue_decodeMmsDataRecursive из mms_access_result.c case 0xa2
+// buffer содержит данные структуры БЕЗ внешнего тега 0xA2 и длины
+func parseStructure(buffer []byte, length int) (*variant.Variant, error) {
+	if length == 0 {
+		// Пустая структура
+		return variant.NewStructureVariant([]*variant.Variant{}), nil
+	}
+
+	var elements []*variant.Variant
+	bufPos := 0
+	maxBufPos := length
+	if maxBufPos > len(buffer) {
+		maxBufPos = len(buffer)
+	}
+
+	// Парсим все элементы структуры
+	for bufPos < maxBufPos {
+		// Сохраняем позицию начала элемента (с тегом)
+		elementStart := bufPos
+		tag := buffer[bufPos]
+		bufPos++
+
+		newPos, elementLength, err := ber.DecodeLength(buffer, bufPos, maxBufPos)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode length for tag 0x%02x: %w", tag, err)
+		}
+		bufPos = newPos
+
+		if bufPos+elementLength > maxBufPos {
+			return nil, fmt.Errorf("invalid length for tag 0x%02x: exceeds buffer size", tag)
+		}
+
+		// Парсим элемент Data рекурсивно
+		// Создаём срез, который начинается с тега и содержит полный элемент (тег + длина + данные)
+		elementEnd := bufPos + elementLength
+		elementBuffer := buffer[elementStart:elementEnd]
+		element, err := parseDataElement(elementBuffer)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse structure element with tag 0x%02x: %w", tag, err)
+		}
+
+		elements = append(elements, element)
+		bufPos = elementEnd
+	}
+
+	return variant.NewStructureVariant(elements), nil
+}
+
+// parseDataElement парсит один элемент Data
+// buffer должен начинаться с тега элемента и содержать полный элемент (тег + длина + данные)
+// Рекурсивно парсит структуры и массивы
+func parseDataElement(buffer []byte) (*variant.Variant, error) {
+	if len(buffer) < 1 {
+		return nil, errors.New("empty buffer for Data element")
+	}
+
+	tag := buffer[0]
+	bufPos := 1
+
+	newPos, length, err := ber.DecodeLength(buffer, bufPos, len(buffer))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode length for tag 0x%02x: %w", tag, err)
+	}
+	bufPos = newPos
+
+	if bufPos+length > len(buffer) {
+		return nil, fmt.Errorf("invalid length for tag 0x%02x: exceeds buffer size", tag)
+	}
+
+	switch tag {
+	case 0x87: // floating-point
+		value, err := parseFloatingPoint(buffer[bufPos:bufPos+length], length)
+		if err != nil {
+			return nil, err
+		}
+		return variant.NewFloat32Variant(value), nil
+
+	case 0x84: // bit-string
+		return parseBitString(buffer[bufPos:bufPos+length], length)
+
+	case 0x85: // integer
+		value, err := parseInteger(buffer[bufPos:bufPos+length], length)
+		if err != nil {
+			return nil, err
+		}
+		return variant.NewInt32Variant(value), nil
+
+	case 0x91: // utc-time
+		value, err := parseUTCTime(buffer[bufPos:bufPos+length], length)
+		if err != nil {
+			return nil, err
+		}
+		return variant.NewUTCTimeVariant(value), nil
+
+	case 0xA2: // structure (рекурсивный вызов)
+		return parseStructure(buffer[bufPos:bufPos+length], length)
+
+	default:
+		return nil, fmt.Errorf("unsupported Data tag: 0x%02x", tag)
+	}
+}
+
 // String возвращает строковое представление ReadResponse
 func (r *ReadResponse) String() string {
 	if len(r.ListOfAccessResult) == 0 {
@@ -596,6 +726,8 @@ func (r *ReadResponse) String() string {
 				case variant.BitString:
 					val := result.Value.BitString()
 					results = append(results, fmt.Sprintf("Result[%d]: bit-string(%d bits)", i, val.BitSize))
+				case variant.Structure:
+					results = append(results, fmt.Sprintf("Result[%d]: %s", i, result.Value.String()))
 				default:
 					results = append(results, fmt.Sprintf("Result[%d]: <unknown type: %v>", i, result.Value.Type()))
 				}
