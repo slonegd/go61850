@@ -535,3 +535,249 @@ func (c *MmsClient) ReadObject(ctx context.Context, readRequest *mms.ReadRequest
 		return readResponse.ListOfAccessResult[0], nil
 	}
 }
+
+// пример ответа через wireshark (не удалять)
+// TPKT, Version: 3, Length: 297 03000129
+// ISO 8073/X.224 COTP Connection-Oriented Transport Protocol 02f080
+// ISO 8327-1 OSI Session Protocol 0100
+// ISO 8327-1 OSI Session Protocol 0100
+// ISO 8823 OSI Presentation Protocol 6182011a30820116020103a082010f
+// MMS a182010b020102a6820104800100a281fea281fba181f8303c8005416e496e31a133a231a12f301a80036d6167a113a211a10f300d800166a108a7060201200201083008800171a1038401f33007800174a1029100303c8005416e496e32a133a231a12f301a80036d6167a113a211a10f300d800166a108a7060201200201083008800171a1038401f33007800174a1029100303c8005416e496e33a133a231a12f301a80036d6167a113a211a10f300d800166a108a7060201200201083008800171a1038401f33007800174a1029100303c8005416e496e34a133a231a12f301a80036d6167a113a211a10f300d800166a108a7060201200201083008800171a1038401f33007800174a1029100
+// confirmed-ResponsePDU
+//
+//	invokeID: 2
+//	confirmedServiceResponse: getVariableAccessAttributes (6)
+//	  getVariableAccessAttributes
+//	    mmsDeletable: False
+//	    typeSpecification: structure (2)
+//	      structure
+//	        components: 4 items
+//	          components item
+//	            componentName: AnIn1
+//	            componentType: structure (2)
+//	              structure
+//	                components: 3 items
+//	                  components item
+//	                    componentName: mag
+//	                    componentType: structure (2)
+//	                      structure
+//	                        components: 1 item
+//	                          components item
+//	                            componentName: f
+//	                  components item
+//	                    componentName: q
+//	                    componentType: bit-string (4)
+//	                      bit-string: -13
+//	                  components item
+//	                    componentName: t
+//	            componentName: AnIn2
+//	            componentType: structure (2)
+//	              structure
+//	                components: 3 items
+//	                  components item
+//	                    componentName: mag
+//	                    componentType: structure (2)
+//	                      structure
+//	                        components: 1 item
+//	                          components item
+//	                            componentName: f
+//	                  components item
+//	                    componentName: q
+//	                    componentType: bit-string (4)
+//	                      bit-string: -13
+//	                  components item
+//	                    componentName: t
+//	            componentName: AnIn3
+//	            componentType: structure (2)
+//	              structure
+//	                components: 3 items
+//	                  components item
+//	                    componentName: mag
+//	                    componentType: structure (2)
+//	                      structure
+//	                        components: 1 item
+//	                          components item
+//	                            componentName: f
+//	                  components item
+//	                    componentName: q
+//	                    componentType: bit-string (4)
+//	                      bit-string: -13
+//	                  components item
+//	                    componentName: t
+//	            componentName: AnIn4
+//	            componentType: structure (2)
+//	              structure
+//	                components: 3 items
+//	                  components item
+//	                    componentName: mag
+//	                    componentType: structure (2)
+//	                      structure
+//	                        components: 1 item
+//	                          components item
+//	                            componentName: f
+//	                  components item
+//	                    componentName: q
+//	                    componentType: bit-string (4)
+//	                      bit-string: -13
+//	                  components item
+//	                    componentName: t
+func (c *MmsClient) GetTypeSpecification(ctx context.Context, readRequest *mms.ReadRequest) (*mms.TypeSpecification, error) {
+	// Проверяем, что соединение установлено
+	if c.cotpConn == nil {
+		return nil, fmt.Errorf("connection not established, call Initiate first")
+	}
+
+	domainID := readRequest.DomainID
+	itemID := readRequest.ItemID
+
+	// Создаём запрос getVariableAccessAttributes
+	getVarAccessAttrRequest := mms.NewGetVariableAccessAttributesRequest(domainID, itemID)
+	mmsPdu := getVarAccessAttrRequest.Bytes()
+
+	// Логируем MMS PDU
+	c.logger.Debug("MMS GetVariableAccessAttributes Request PDU: %x", mmsPdu)
+
+	// Обёртываем в Presentation user-data
+	// contextID = 3 для MMS (mms-abstract-syntax-version1)
+	presentationPdu := presentation.BuildUserData(mmsPdu, 3)
+
+	// Обёртываем в Session: Give tokens PDU + DT SPDU + Presentation PDU
+	sessionPdu := session.BuildDataTransferWithTokens(presentationPdu)
+
+	// Отправляем через COTP
+	err := c.cotpConn.SendDataMessage(sessionPdu)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send GetVariableAccessAttributes Request: %w", err)
+	}
+
+	// Получаем ответ
+	for {
+		// Проверяем контекст перед каждой итерацией цикла
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		state, err := c.cotpConn.ReadToTpktBuffer(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read TPKT: %w", err)
+		}
+
+		if state == cotp.TpktError {
+			return nil, fmt.Errorf("TPKT read error")
+		}
+
+		if state == cotp.TpktWaiting {
+			continue
+		}
+
+		// state == cotp.TpktPacketComplete
+		indication, err := c.cotpConn.ParseIncomingMessage()
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse COTP message: %w", err)
+		}
+
+		if indication == cotp.IndicationMoreFragmentsFollow {
+			// Продолжаем читать фрагменты
+			continue
+		}
+
+		if indication != cotp.IndicationData {
+			return nil, fmt.Errorf("unexpected COTP indication: %d", indication)
+		}
+
+		// indication == cotp.IndicationData
+		// Получаем payload из COTP
+		payload := c.cotpConn.GetPayload()
+		// Сбрасываем payload в конце обработки
+		defer c.cotpConn.ResetPayload()
+
+		if len(payload) == 0 {
+			return nil, fmt.Errorf("received empty COTP payload")
+		}
+
+		// Выводим ответ в лог в виде байтов
+		c.logger.Debug("GetVariableAccessAttributes Response (raw bytes): %x", payload)
+
+		// Парсим Session SPDU
+		sessionPdu, err := session.ParseSessionSPDU(payload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse Session SPDU: %w", err)
+		}
+		if sessionPdu == nil {
+			return nil, fmt.Errorf("session SPDU is nil after parsing")
+		}
+
+		// Логируем результат парсинга
+		c.logger.Debug("  %s", sessionPdu)
+
+		// Парсим Presentation PDU
+		if len(sessionPdu.Data) == 0 {
+			return nil, fmt.Errorf("session SPDU data is empty")
+		}
+
+		presentationPdu, err := presentation.ParsePresentationPDU(sessionPdu.Data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse Presentation PDU: %w", err)
+		}
+		if presentationPdu == nil {
+			return nil, fmt.Errorf("presentation PDU is nil after parsing")
+		}
+
+		// Логируем результат парсинга
+		c.logger.Debug("  %s", presentationPdu)
+
+		// Определяем, что содержится в Presentation PDU
+		// После установления соединения данные могут идти напрямую как MMS PDU (contextId = 3)
+		// или через ACSE (contextId = 1)
+		var mmsData []byte
+		if presentationPdu.PresentationContextId == 3 {
+			// MMS context - данные идут напрямую как MMS PDU
+			mmsData = presentationPdu.Data
+			c.logger.Debug("MMS GetVariableAccessAttributes Response PDU (raw bytes): %x", mmsData)
+		} else if presentationPdu.PresentationContextId == 1 {
+			// ACSE context - нужно парсить ACSE PDU
+			if len(presentationPdu.Data) == 0 {
+				return nil, fmt.Errorf("presentation PDU data is empty")
+			}
+
+			acsePdu, err := acse.ParseACSEPDU(presentationPdu.Data)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse ACSE PDU: %w", err)
+			}
+			if acsePdu == nil {
+				return nil, fmt.Errorf("ACSE PDU is nil after parsing")
+			}
+
+			// Логируем результат парсинга
+			c.logger.Debug("  %s", acsePdu)
+
+			// Выводим MMS данные в лог
+			if len(acsePdu.Data) > 0 {
+				c.logger.Debug("MMS GetVariableAccessAttributes Response PDU (raw bytes): %x", acsePdu.Data)
+			}
+
+			mmsData = acsePdu.Data
+		} else {
+			return nil, fmt.Errorf("unknown presentation context ID: %d", presentationPdu.PresentationContextId)
+		}
+
+		// Парсим MMS GetVariableAccessAttributes Response
+		if len(mmsData) == 0 {
+			return nil, fmt.Errorf("MMS data is empty")
+		}
+
+		// Парсим полный ответ GetVariableAccessAttributes, включая invokeID, mmsDeletable и typeSpecification
+		response, err := mms.ParseGetVariableAccessAttributesResponse(mmsData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse MMS GetVariableAccessAttributes Response: %w", err)
+		}
+
+		c.logger.Debug("  InvokeID: %d", response.InvokeID)
+		c.logger.Debug("  MmsDeletable: %v", response.MmsDeletable)
+		c.logger.Debug("  TypeSpecification: %+v", response.TypeSpecification)
+		if response.TypeSpecification != nil && response.TypeSpecification.Structure != nil {
+			c.logger.Debug("  Structure: %+v", response.TypeSpecification.Structure)
+		}
+		return response.TypeSpecification, nil
+	}
+}

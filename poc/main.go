@@ -232,6 +232,15 @@ func proofOfConcept(conn net.Conn, l logger.Logger) error {
 
 	l.Debug("ReadObject result: %+v", readResult)
 
+	// // Получаем дерево объектов через getVariableAccessAttributes
+	// typeSpecification, err := client.GetTypeSpecification(ctx, readRequest)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get type specification: %w", err)
+	// }
+
+	// // Выводим дерево объектов в лог
+	// l.Debug("Objects tree: %+v", typeSpecification)
+
 	return nil
 }
 
