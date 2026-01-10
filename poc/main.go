@@ -212,9 +212,12 @@ import (
 // proofOfConcept выполняет Proof of Concept: устанавливает COTP соединение,
 // отправляет MMS Initiate Request и получает ответ, затем читает объект.
 func proofOfConcept(conn net.Conn, l logger.Logger) error {
-	client := go61850.NewMmsClient(conn, go61850.WithLogger(l))
-
 	ctx := context.Background()
+	client, err := go61850.NewMmsClient(ctx, conn, go61850.WithLogger(l))
+	if err != nil {
+		return err
+	}
+
 	response, err := client.Initiate(ctx)
 	if err != nil {
 		return err

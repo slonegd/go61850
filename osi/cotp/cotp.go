@@ -166,6 +166,17 @@ func NewConnection(conn io.ReadWriteCloser, opts ...ConnectionOption) *Connectio
 	return c
 }
 
+// NewConnectedConnection создает новое COTP соединение и устанавливает его (клиентская сторона).
+// Это удобный конструктор, который объединяет создание соединения и установку подключения.
+// Если нужно создать соединение без немедленного подключения, используйте NewConnection и затем вызовите Connect.
+func NewConnectedConnection(ctx context.Context, conn io.ReadWriteCloser, params *IsoConnectionParameters, opts ...ConnectionOption) (*Connection, error) {
+	c := NewConnection(conn, opts...)
+	if err := c.Connect(ctx, params); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
 // GetTpduSize возвращает размер TPDU в байтах
 func (c *Connection) GetTpduSize() int {
 	return 1 << c.options.TpduSize
@@ -398,6 +409,66 @@ func (c *Connection) SendConnectionResponseMessage() error {
 	}
 
 	return c.sendBuffer()
+}
+
+// Connect устанавливает COTP соединение (клиентская сторона).
+// Отправляет Connection Request и ожидает Connection Confirm от сервера.
+// Проверяет контекст перед каждой операцией чтения.
+func (c *Connection) Connect(ctx context.Context, params *IsoConnectionParameters) error {
+	// Отправляем Connection Request
+	err := c.SendConnectionRequestMessage(params)
+	if err != nil {
+		return fmt.Errorf("failed to send COTP CR: %w", err)
+	}
+
+	// Ожидаем Connection Confirm
+	for {
+		// Проверяем контекст перед каждой итерацией цикла
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// ответ от сервера
+		// RX: 03 00 00 16 11 d0 00 01 00 01 00 c0 01 0d c2 02 00 01 c1 02 00 01
+		// TPKT, Version: 3, Length: 22
+		// Version: 3 Reserved: 0 Length: 22
+		// ISO 8073/X.224 COTP Connection-Oriented Transport Protocol
+		// Length: 17
+		// PDU Type: CC Connect Confirm (0x0d)
+		// Destination reference: 0x0001
+		// Source reference: 0x0001
+		// 0000 .... = Class: 0
+		// .... ..0. = Extended formats: False
+		// .... ...0 = No explicit flow control: False
+		// Parameter code: tpdu-size (0xc0)
+		// Parameter length: 1
+		// TPDU size: 8192
+		// Parameter code: dst-tsap (0xc2)
+		// Parameter length: 2
+		// Destination TSAP: 0001
+		// Parameter code: src-tsap (0xc1)
+		// Parameter length: 2
+		// Source TSAP: 0001
+		state, err := c.ReadToTpktBuffer(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to read TPKT: %w", err)
+		}
+
+		if state == TpktPacketComplete {
+			indication, err := c.ParseIncomingMessage()
+			if err != nil {
+				return fmt.Errorf("failed to parse COTP message: %w", err)
+			}
+
+			if indication == IndicationConnect {
+				break
+			}
+		} else if state == TpktError {
+			return errors.New("TPKT read error")
+		}
+	}
+
+	return nil
 }
 
 // parseOptions парсит опции COTP
